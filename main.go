@@ -15,7 +15,7 @@ import (
 	"github.com/agent-api/ollama"
 
 	"github.com/lmittmann/tint"
-	"golang.org/x/exp/slog"
+	"log/slog"
 )
 
 func extractFrames(videoPath, outputDir string, interval int) error {
