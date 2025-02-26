@@ -22,30 +22,60 @@ import (
 )
 
 func extractFrames(videoPath, outputDir string, interval int) error {
+	// Create output directory if it doesn't exist
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
 		err := os.MkdirAll(outputDir, 0755)
 		if err != nil {
-				return fmt.Errorf("failed to create output directory: %v", err)
+			return fmt.Errorf("failed to create output directory: %v", err)
 		}
-}
+	}
 
-if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+	// Check if video file exists
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
 		return fmt.Errorf("video file does not exist: %s", videoPath)
-}
+	}
 
-ffmpegCommand := exec.Command(
+	// Create a folder name based on the video file name
+	videoBaseName := filepath.Base(videoPath)
+	videoName := strings.TrimSuffix(videoBaseName, filepath.Ext(videoBaseName))
+	frameDirPath := filepath.Join(outputDir, videoName)
+	
+	// Check if frames already exist
+	if files, err := os.ReadDir(frameDirPath); err == nil && len(files) > 0 {
+		// Count the number of jpg files
+		frameCount := 0
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") {
+				frameCount++
+			}
+		}
+		
+		if frameCount > 0 {
+			fmt.Printf("Frames already exist in %s. Skipping extraction. Found %d frames.\n", frameDirPath, frameCount)
+			return nil
+		}
+	}
+	
+	// Create the frame directory
+	if err := os.MkdirAll(frameDirPath, 0755); err != nil {
+		return fmt.Errorf("failed to create frame directory: %v", err)
+	}
+
+	// Extract frames using ffmpeg
+	ffmpegCommand := exec.Command(
 		"ffmpeg",
 		"-i", videoPath,
 		"-vf", fmt.Sprintf("fps=1/%d", interval),
-		fmt.Sprintf("%s/frame_%%04d.jpg", outputDir),
-)
+		fmt.Sprintf("%s/frame_%%04d.jpg", frameDirPath),
+	)
 
-output, err := ffmpegCommand.CombinedOutput()
-if err != nil {
+	output, err := ffmpegCommand.CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("ffmpeg error: %v\nOutput: %s", err, string(output))
-}
+	}
 
-return nil
+	fmt.Printf("Extracted frames to %s\n", frameDirPath)
+	return nil
 }
 
 func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
@@ -72,35 +102,40 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
-	err := extractFrames(videoPath, outputDir, 5)
-	if err != nil {
-		return err
-	}
+    err := extractFrames(videoPath, outputDir, 5)
+    if err != nil {
+        return err
+    }
 
-	files, err := os.ReadDir(outputDir)
-	if err != nil {
-		return err
-	}
+    // Create a folder name based on the video file name
+    videoBaseName := filepath.Base(videoPath)
+    videoName := strings.TrimSuffix(videoBaseName, filepath.Ext(videoBaseName))
+    frameDirPath := filepath.Join(outputDir, videoName)
 
-	var frames []string
-	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".jpg") {
-			frames = append(frames, file.Name())
-		}
-	}
-	sort.Strings(frames)
+    files, err := os.ReadDir(frameDirPath)
+    if err != nil {
+        return err
+    }
 
-	for _, frame := range frames {
-		framePath := filepath.Join(outputDir, frame)
-		fmt.Printf("Analyzing frame: %s\n", frame)
-		analysis, err := analyzeImage(ctx, a, framePath)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Analysis: %s\n\n", analysis)
-	}
+    var frames []string
+    for _, file := range files {
+        if strings.HasSuffix(file.Name(), ".jpg") {
+            frames = append(frames, file.Name())
+        }
+    }
+    sort.Strings(frames)
 
-	return nil
+    for _, frame := range frames {
+        framePath := filepath.Join(frameDirPath, frame)
+        fmt.Printf("Analyzing frame: %s\n", frame)
+        analysis, err := analyzeImage(ctx, a, framePath)
+        if err != nil {
+            return err
+        }
+        fmt.Printf("Analysis: %s\n\n", analysis)
+    }
+
+    return nil
 }
 
 func main() {
