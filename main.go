@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -110,7 +111,7 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
     // Base64 encode the image data
     base64Image := base64.StdEncoding.EncodeToString(imageData)
 
-    // Create vision prompt with base64 encoded image data - using a simpler format
+    // Create vision prompt with base64 encoded image data
     prompt := fmt.Sprintf(`
     [
       {
@@ -139,13 +140,62 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
         return "", fmt.Errorf("LLM returned empty response for image '%s'", imagePath)
     }
 
-    // Extract the actual description from the response
+    // Debug the structure of the response
+    fmt.Printf("\n---RESPONSE STRUCTURE---\n")
+    fmt.Printf("Response type: %T\n", response)
+    fmt.Printf("Response length: %d\n", len(response))
+    fmt.Printf("First response: %+v\n", response[0])
+    if response[0].Message != nil {
+        fmt.Printf("Message type: %T\n", response[0].Message)
+        fmt.Printf("Message: %+v\n", response[0].Message)
+        fmt.Printf("Content type: %T\n", response[0].Message.Content)
+        fmt.Printf("Content length: %d\n", len(response[0].Message.Content))
+    }
+    
     content := response[0].Message.Content
     
-    // Log both the raw content and the extracted description for debugging
-    fmt.Printf("\n---AI RESPONSE START---\n%s\n---AI RESPONSE END---\n\n", content)
+    // Try to clean up the content if it contains JSON or base64
+    cleanContent := content
+    if strings.Contains(content, "base64") || strings.Contains(content, "data:") {
+        cleanContent = "Contains base64 data - cleaning needed"
+    }
     
-    return content, nil
+    // Log both raw and cleaned content
+    fmt.Printf("\n---AI RESPONSE START---\n%s\n---AI RESPONSE END---\n\n", content)
+        
+    return cleanContent, nil
+}
+
+// New type to store frame analysis results
+type FrameAnalysis struct {
+    FrameName   string `json:"frame_name"`
+    Description string `json:"description"`
+    Timestamp   string `json:"timestamp"`
+}
+
+// New type for the whole video analysis results
+type VideoAnalysis struct {
+    VideoName   string         `json:"video_name"`
+    ProcessedAt string         `json:"processed_at"`
+    Frames      []FrameAnalysis `json:"frames"`
+}
+
+// Save analysis results to JSON file
+func saveAnalysisToJSON(outputPath string, analysis VideoAnalysis) error {
+    // Create the JSON data
+    jsonData, err := json.MarshalIndent(analysis, "", "  ")
+    if err != nil {
+        return fmt.Errorf("failed to marshal JSON data: %v", err)
+    }
+    
+    // Write to file
+    err = os.WriteFile(outputPath, jsonData, 0644)
+    if err != nil {
+        return fmt.Errorf("failed to write JSON file: %v", err)
+    }
+        
+    fmt.Printf("Analysis results saved to: %s\n", outputPath)
+    return nil
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
@@ -184,14 +234,39 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
     fmt.Printf("Found %d frames to analyze\n", len(frames))
     sort.Strings(frames)
 
+    // Initialize video analysis struct
+    analysis := VideoAnalysis{
+        VideoName:   videoName,
+        ProcessedAt: time.Now().Format(time.RFC3339),
+        Frames:      []FrameAnalysis{},
+    }
+
     for i, frame := range frames {
         framePath := filepath.Join(frameDirPath, frame)
         fmt.Printf("\n===== Analyzing frame %d/%d: %s =====\n", i+1, len(frames), frame)
-        
-        _, err := analyzeImage(ctx, a, framePath)
+           
+        description, err := analyzeImage(ctx, a, framePath)
         if err != nil {
             return fmt.Errorf("failed to analyze frame '%s': %v", framePath, err)
         }
+
+        // Calculate approximate timestamp based on interval used in extractFrames
+        frameNumber := 0
+        fmt.Sscanf(frame, "frame_%04d.jpg", &frameNumber)
+        timestamp := fmt.Sprintf("%02d:%02d", (frameNumber * 5) / 60, (frameNumber * 5) % 60)
+               
+        // Add to analysis results
+        analysis.Frames = append(analysis.Frames, FrameAnalysis{
+            FrameName:   frame,
+            Description: description,
+            Timestamp:   timestamp,
+        })
+    }
+
+    // Save analysis results to JSON file
+    jsonPath := filepath.Join(outputDir, videoName + "_analysis.json")
+    if err := saveAnalysisToJSON(jsonPath, analysis); err != nil {
+        return fmt.Errorf("failed to save analysis results: %v", err)
     }
 
     fmt.Printf("\nSuccessfully processed all %d frames from video '%s'\n", len(frames), videoPath)
