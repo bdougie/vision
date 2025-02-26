@@ -90,95 +90,98 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 }
 
 func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
-	// Check if image exists
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("image file does not exist at path: '%s'", imagePath)
-	} else if err != nil {
-		return "", fmt.Errorf("error checking image file: %v", err)
-	}
+    // Check if image exists
+    if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+        return "", fmt.Errorf("image file does not exist at path: '%s'", imagePath)
+    } else if err != nil {
+        return "", fmt.Errorf("error checking image file: %v", err)
+    }
 
-	// Read image data
-	imageData, err := os.ReadFile(imagePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read image file '%s': %v", imagePath, err)
-	}
+    // Read image data
+    imageData, err := os.ReadFile(imagePath)
+    if err != nil {
+        return "", fmt.Errorf("failed to read image file '%s': %v", imagePath, err)
+    }
 
-	if len(imageData) == 0 {
-		return "", fmt.Errorf("image file '%s' is empty", imagePath)
-	}
+    if len(imageData) == 0 {
+        return "", fmt.Errorf("image file '%s' is empty", imagePath)
+    }
 
-	// Base64 encode the image data
-	base64Image := base64.StdEncoding.EncodeToString(imageData)
+    // Base64 encode the image data
+    base64Image := base64.StdEncoding.EncodeToString(imageData)
 
-	// Create vision prompt with base64 encoded image data
-	prompt := fmt.Sprintf(`[
-		{"type": "text", "text": "Describe this image in detail."},
-		{"type": "image", "source": {"data": "data:image/jpeg;base64,%s", "media_type": "image/jpeg"}}
-	]`, base64Image)
+    // Create vision prompt with base64 encoded image data
+    prompt := fmt.Sprintf(`[
+        {"type": "text", "text": "Describe this image in detail."},
+        {"type": "image", "source": {"data": "data:image/jpeg;base64,%s", "media_type": "image/jpeg"}}
+    ]`, base64Image)
 
-	// Call the LLM
-	response, err := a.Run(ctx, prompt, agent.DefaultStopCondition)
-	if err != nil {
-		return "", fmt.Errorf("LLM failed to analyze image '%s': %v", imagePath, err)
-	}
+    fmt.Printf("Sending image to model for analysis...\n")
+    
+    // Call the LLM
+    response, err := a.Run(ctx, prompt, agent.DefaultStopCondition)
+    if err != nil {
+        return "", fmt.Errorf("LLM failed to analyze image '%s': %v", imagePath, err)
+    }
 
-	if len(response) == 0 || response[0].Message == nil {
-		return "", fmt.Errorf("LLM returned empty response for image '%s'", imagePath)
-	}
+    if len(response) == 0 || response[0].Message == nil {
+        return "", fmt.Errorf("LLM returned empty response for image '%s'", imagePath)
+    }
 
-	return response[0].Message.Content, nil
+    content := response[0].Message.Content
+    fmt.Printf("\n---AI RESPONSE START---\n%s\n---AI RESPONSE END---\n\n", content)
+    
+    return content, nil
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
-	fmt.Printf("Processing video: '%s'\n", videoPath)
-	
-	err := extractFrames(videoPath, outputDir, 5)
-	if err != nil {
-		return fmt.Errorf("frame extraction failed: %v", err)
-	}
+    fmt.Printf("Processing video: '%s'\n", videoPath)
+    
+    err := extractFrames(videoPath, outputDir, 5)
+    if err != nil {
+        return fmt.Errorf("frame extraction failed: %v", err)
+    }
 
-	// Create a folder name based on the video file name
-	videoBaseName := filepath.Base(videoPath)
-	videoName := strings.TrimSuffix(videoBaseName, filepath.Ext(videoBaseName))
-	frameDirPath := filepath.Join(outputDir, videoName)
+    // Create a folder name based on the video file name
+    videoBaseName := filepath.Base(videoPath)
+    videoName := strings.TrimSuffix(videoBaseName, filepath.Ext(videoBaseName))
+    frameDirPath := filepath.Join(outputDir, videoName)
 
-	files, err := os.ReadDir(frameDirPath)
-	if err != nil {
-		return fmt.Errorf("failed to read frames directory '%s': %v", frameDirPath, err)
-	}
+    files, err := os.ReadDir(frameDirPath)
+    if err != nil {
+        return fmt.Errorf("failed to read frames directory '%s': %v", frameDirPath, err)
+    }
 
-	if len(files) == 0 {
-		return fmt.Errorf("no frames found in directory '%s'", frameDirPath)
-	}
+    if len(files) == 0 {
+        return fmt.Errorf("no frames found in directory '%s'", frameDirPath)
+    }
 
-	var frames []string
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") {
-			frames = append(frames, file.Name())
-		}
-	}
-	
-	if len(frames) == 0 {
-		return fmt.Errorf("no JPEG frames found in directory '%s'", frameDirPath)
-	}
-	
-	fmt.Printf("Found %d frames to analyze\n", len(frames))
-	sort.Strings(frames)
+    var frames []string
+    for _, file := range files {
+        if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") {
+            frames = append(frames, file.Name())
+        }
+    }
+    
+    if len(frames) == 0 {
+        return fmt.Errorf("no JPEG frames found in directory '%s'", frameDirPath)
+    }
+    
+    fmt.Printf("Found %d frames to analyze\n", len(frames))
+    sort.Strings(frames)
 
-	for i, frame := range frames {
-		framePath := filepath.Join(frameDirPath, frame)
-		fmt.Printf("Analyzing frame %d/%d: %s\n", i+1, len(frames), frame)
-		
-		analysis, err := analyzeImage(ctx, a, framePath)
-		if err != nil {
-			return fmt.Errorf("failed to analyze frame '%s': %v", framePath, err)
-		}
-		
-		fmt.Printf("Analysis for frame %d/%d:\n%s\n\n", i+1, len(frames), analysis)
-	}
+    for i, frame := range frames {
+        framePath := filepath.Join(frameDirPath, frame)
+        fmt.Printf("\n===== Analyzing frame %d/%d: %s =====\n", i+1, len(frames), frame)
+        
+        _, err := analyzeImage(ctx, a, framePath)
+        if err != nil {
+            return fmt.Errorf("failed to analyze frame '%s': %v", framePath, err)
+        }
+    }
 
-	fmt.Printf("Successfully processed all %d frames from video '%s'\n", len(frames), videoPath)
-	return nil
+    fmt.Printf("\nSuccessfully processed all %d frames from video '%s'\n", len(frames), videoPath)
+    return nil
 }
 
 func main() {
