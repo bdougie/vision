@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -38,7 +37,7 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 }
 
 func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (string, error) {
-	imageData, err := ioutil.ReadFile(imagePath)
+	imageData, err := os.ReadFile(imagePath)
 	if err != nil {
 		return "", err
 	}
@@ -63,7 +62,7 @@ func processVideo(ctx context.Context, agent *agent.Agent, videoPath, outputDir 
 		return err
 	}
 
-	files, err := ioutil.ReadDir(outputDir)
+	files, err := os.ReadDir(outputDir)
 	if err != nil {
 		return err
 	}
