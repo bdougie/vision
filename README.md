@@ -27,3 +27,22 @@ VisionFrameAnalyzer is a Go-based tool that:
 brew install ffmpeg
 go mod tidy
 ```
+##2️⃣ Run the Analysis
+```sh
+go run main.go --video path/to/video.mp4 --output output_frames
+```
+
+## 🛠 Usage Example
+```
+go run main.go --video input.mp4 --output frames
+```
+
+## 📌 Use Cases
+
+📽️ Automated Video Analysis – Extract insights from video feeds
+🔍 Content Moderation – Detect and describe images in video content
+🛠 Machine Learning Pipelines – Pre-process video datasets for AI models
+
+## 📜 License
+
+MIT License. See LICENSE for details.

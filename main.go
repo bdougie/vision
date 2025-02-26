@@ -14,6 +14,7 @@ import (
 
 	"github.com/agent-api/core/pkg/agent"
 	"github.com/agent-api/ollama"
+
 	"github.com/lmittmann/tint"
 	"golang.org/x/exp/slog"
 )
