@@ -14,8 +14,9 @@ import (
 	"github.com/agent-api/core/pkg/agent"
 	"github.com/agent-api/ollama"
 
-	"github.com/lmittmann/tint"
 	"log/slog"
+
+	"github.com/lmittmann/tint"
 )
 
 func extractFrames(videoPath, outputDir string, interval int) error {
@@ -38,7 +39,7 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 
 func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (string, error) {
 	imageData, err := os.ReadFile(imagePath)
-	if err != nil {
+	if (err != nil) {
 		return "", err
 	}
 
@@ -93,20 +94,23 @@ func main() {
 
 	// Configure logger
 	logger := slog.New(
-		tint.NewHandler(os.Stderr, &tint.Options{
-			Level:      slog.LevelDebug,
-			TimeFormat: time.Kitchen,
-		}),
+			tint.NewHandler(os.Stderr, &tint.Options{
+					Level:      slog.LevelDebug,
+					TimeFormat: time.Kitchen,
+			}),
 	)
 
 	// Set up Ollama provider
 	opts := &ollama.ProviderOpts{
-		Logger:  logger,
-		BaseURL: "http://localhost",
-		Port:    11434,
+			Logger:  logger,
+			BaseURL: "http://localhost",
+			Port:    11434,
 	}
 	provider := ollama.NewProvider(opts)
-	provider.UseModel(ctx, "llama3.2-11b-vision")
+
+	// Use the correct model
+	model := &agent.Model{Name: "llama3.2-vision:11b"}
+	provider.UseModel(ctx, model)
 
 	// Create agent configuration
 	agentConf := &agent.NewAgentConfig{
