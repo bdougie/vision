@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/agent-api/core/pkg/agent"
+	"github.com/agent-api/core/types"
 	"github.com/agent-api/ollama"
 
 	"log/slog"
@@ -37,7 +38,7 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 	return ffmpegCommand.Run()
 }
 
-func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (string, error) {
+func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
 	imageData, err := os.ReadFile(imagePath)
 	if (err != nil) {
 		return "", err
@@ -49,7 +50,7 @@ func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (st
 		{"type": "image", "source": {"data": "%s", "media_type": "image/jpeg"}}
 	]`, imageData)
 
-	response, err := agent.Run(ctx, prompt, agent.DefaultStopCondition)
+	response, err := a.Run(ctx, prompt, agent.DefaultStopCondition)
 	if err != nil {
 		return "", err
 	}
@@ -57,7 +58,7 @@ func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (st
 	return response[0].Message.Content, nil
 }
 
-func processVideo(ctx context.Context, agent *agent.Agent, videoPath, outputDir string) error {
+func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
 	err := extractFrames(videoPath, outputDir, 5)
 	if err != nil {
 		return err
@@ -79,7 +80,7 @@ func processVideo(ctx context.Context, agent *agent.Agent, videoPath, outputDir 
 	for _, frame := range frames {
 		framePath := filepath.Join(outputDir, frame)
 		fmt.Printf("Analyzing frame: %s\n", frame)
-		analysis, err := analyzeImage(ctx, agent, framePath)
+		analysis, err := analyzeImage(ctx, a, framePath)
 		if err != nil {
 			return err
 		}
@@ -109,14 +110,16 @@ func main() {
 	provider := ollama.NewProvider(opts)
 
 	// Use the correct model
-	model := &agent.Model{Name: "llama3.2-vision:11b"}
+	model := &types.Model{
+		ID: "llama3.2-vision:11b",
+	}
 	provider.UseModel(ctx, model)
 
 	// Create agent configuration
 	agentConf := &agent.NewAgentConfig{
 		Provider:     provider,
 		Logger:       logger,
-		SystemPrompt: "You are a visual analysis assistant specialized in detailed image descriptions",
+		SystemPrompt: "You are a visual analysis assistant specialized in detailed image descriptions. If there is a person in the image describe what they are doing in step by step format.",
 	}
 
 	// Initialize agent
@@ -128,6 +131,7 @@ func main() {
 
 	err := processVideo(ctx, visionAgent, videoPath, outputDir)
 	if err != nil {
-		log.Fatal(err)
-	}
+		log.Printf("Error processing video: %v", err)
+		os.Exit(1)
+}
 }
