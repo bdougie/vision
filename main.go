@@ -182,76 +182,86 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
 }
 
 func main() {
-	// Configure logger
-	logger := slog.New(
-		tint.NewHandler(os.Stderr, &tint.Options{
-			Level:      slog.LevelDebug,
-			TimeFormat: time.Kitchen,
-		}),
-	)
+    // Create context first
+    ctx := context.Background()
 
-	// Check if Ollama is running
-	_, err := exec.Command("curl", "-s", "http://localhost:11434/api/tags").Output()
-	if err != nil {
-		log.Printf("Error: Ollama server is not running. Please start it with 'ollama serve'")
-		os.Exit(1)
-	}
+    // Configure logger
+    logger := slog.New(
+        tint.NewHandler(os.Stderr, &tint.Options{
+            Level:      slog.LevelDebug,
+            TimeFormat: time.Kitchen,
+        }),
+    )
 
-	fmt.Println("Setting up Ollama provider...")
-	
-	// Set up Ollama provider
-	opts := &ollama.ProviderOpts{
-		Logger:  logger,
-		BaseURL: "http://localhost",
-		Port:    11434,
-	}
-	provider := ollama.NewProvider(opts)
+    // Check if Ollama is running
+    _, err := exec.Command("curl", "-s", "http://localhost:11434/api/tags").Output()
+    if err != nil {
+        log.Printf("Error: Ollama server is not running. Please start it with 'ollama serve'")
+        os.Exit(1)
+    }
 
-	// Check if the model exists
-	modelName := "llama3.2-vision:11b"
-	_, err = exec.Command("ollama", "list").Output()
-	if err != nil {
-		log.Printf("Warning: Could not check if model '%s' exists. You may need to pull it with 'ollama pull %s'", 
-			modelName, modelName)
-	}
+    fmt.Println("Setting up Ollama provider...")
+    
+    // Set up Ollama provider
+    opts := &ollama.ProviderOpts{
+        Logger:  logger,
+        BaseURL: "http://localhost",
+        Port:    11434,
+    }
+    provider := ollama.NewProvider(opts)
 
-	// Use the correct model
-	fmt.Printf("Using vision model: %s\n", modelName)
-	model := &types.Model{
-		ID: modelName,
-	}
-	provider.UseModel(ctx, model)
+    // Check if the model exists
+    modelName := "llama3.2-vision:11b"
+    _, err = exec.Command("ollama", "list").Output()
+    if err != nil {
+        log.Printf("Warning: Could not check if model '%s' exists. You may need to pull it with 'ollama pull %s'", 
+            modelName, modelName)
+    }
 
-	// Create agent configuration
-	fmt.Println("Creating visual analysis agent...")
-	agentConf := &agent.NewAgentConfig{
-		Provider:     provider,
-		Logger:       logger,
-		SystemPrompt: "You are a visual analysis assistant specialized in detailed image descriptions.",
-	}
+    // Use the correct model
+    fmt.Printf("Using vision model: %s\n", modelName)
+    model := &types.Model{
+        ID: modelName,
+    }
+    provider.UseModel(ctx, model)
 
-	// Initialize agent
-	visionAgent := agent.NewAgent(agentConf)
+    // Create agent configuration
+    fmt.Println("Creating visual analysis agent...")
+    agentConf := &agent.NewAgentConfig{
+        Provider:     provider,
+        Logger:       logger,
+        SystemPrompt: "You are a visual analysis assistant specialized in detailed image descriptions.",
+    }
 
-	// Get video path from command line or use default
-	videoPath := "input.mp4"
-	if len(os.Args) > 1 {
-		videoPath = os.Args[1]
-	}
-	
-	outputDir := "output_frames"
-	if len(os.Args) > 2 {
-		outputDir = os.Args[2]
-	}
+    // Initialize agent
+    visionAgent := agent.NewAgent(agentConf)
 
-	// Process video
-	fmt.Printf("Starting video analysis process...\n")
-	ctx := context.Background()
-	err = processVideo(ctx, visionAgent, videoPath, outputDir)
-	if err != nil {
-		log.Printf("Error processing video: %v", err)
-		os.Exit(1)
-	}
+    // Parse command line arguments
+    videoPath := "input.mp4"
+    outputDir := "output_frames"
+    
+    for i := 1; i < len(os.Args); i++ {
+        switch os.Args[i] {
+        case "--video":
+            if i+1 < len(os.Args) {
+                videoPath = os.Args[i+1]
+                i++
+            }
+        case "--output":
+            if i+1 < len(os.Args) {
+                outputDir = os.Args[i+1]
+                i++
+            }
+        }
+    }
 
-	fmt.Println("Video processing completed successfully!")
+    // Process video
+    fmt.Printf("Starting video analysis process...\n")
+    err = processVideo(ctx, visionAgent, videoPath, outputDir)
+    if err != nil {
+        log.Printf("Error processing video: %v", err)
+        os.Exit(1)
+    }
+
+    fmt.Println("Video processing completed successfully!")
 }
