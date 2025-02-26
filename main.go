@@ -110,10 +110,21 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
     // Base64 encode the image data
     base64Image := base64.StdEncoding.EncodeToString(imageData)
 
-    // Create vision prompt with base64 encoded image data
-    prompt := fmt.Sprintf(`[
-        {"type": "text", "text": "Describe this image in detail."},
-        {"type": "image", "source": {"data": "data:image/jpeg;base64,%s", "media_type": "image/jpeg"}}
+    // Create vision prompt with base64 encoded image data - using a simpler format
+    prompt := fmt.Sprintf(`
+    [
+      {
+        "type": "text",
+        "text": "Please describe what you see in this image. Be specific and detailed about the main subjects, actions, and setting."
+      },
+      {
+        "type": "image",
+        "source": {
+          "type": "base64",
+          "media_type": "image/jpeg",
+          "data": "%s"
+        }
+      }
     ]`, base64Image)
 
     fmt.Printf("Sending image to model for analysis...\n")
@@ -128,7 +139,10 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
         return "", fmt.Errorf("LLM returned empty response for image '%s'", imagePath)
     }
 
+    // Extract the actual description from the response
     content := response[0].Message.Content
+    
+    // Log both the raw content and the extracted description for debugging
     fmt.Printf("\n---AI RESPONSE START---\n%s\n---AI RESPONSE END---\n\n", content)
     
     return content, nil

@@ -34,7 +34,7 @@ go run main.go --video path/to/video.mp4 --output output_frames
 
 ## 🛠 Usage Example
 ```
-go run main.go --video input.mp4 --output frames
+go run main.go --video input.mp4
 ```
 
 ## 📌 Use Cases
