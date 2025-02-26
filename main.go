@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,9 +10,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/agent-api/core/pkg/agent"
+	"github.com/agent-api/ollama"
+	"github.com/lmittmann/tint"
+	"golang.org/x/exp/slog"
 )
 
-// Function to extract frames from video using FFmpeg
 func extractFrames(videoPath, outputDir string, interval int) error {
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
 		err := os.MkdirAll(outputDir, 0755)
@@ -30,38 +36,27 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 	return ffmpegCommand.Run()
 }
 
-// Function to analyze an image using Llama 3.2
-func analyzeImage(imagePath string) (string, error) {
+func analyzeImage(ctx context.Context, agent *agent.Agent, imagePath string) (string, error) {
 	imageData, err := ioutil.ReadFile(imagePath)
 	if err != nil {
 		return "", err
 	}
 
-	client, err := api.ClientFromEnvironment()
+	// Create vision prompt with image data
+	prompt := fmt.Sprintf(`[
+		{"type": "text", "text": "Describe this image in detail."},
+		{"type": "image", "source": {"data": "%s", "media_type": "image/jpeg"}}
+	]`, imageData)
+
+	response, err := agent.Run(ctx, prompt, agent.DefaultStopCondition)
 	if err != nil {
 		return "", err
 	}
 
-	response, err := client.Chat(api.ChatRequest{
-		Model: "llama3.2-11b-vision",
-		Messages: []api.Message{
-			{
-				Role:    "user",
-				Content: "Describe this image in detail.",
-				Images:  []string{string(imageData)},
-			},
-		},
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	return response.Message.Content, nil
+	return response[0].Message.Content, nil
 }
 
-// Main function to process video and analyze frames
-func processVideo(videoPath, outputDir string) error {
+func processVideo(ctx context.Context, agent *agent.Agent, videoPath, outputDir string) error {
 	err := extractFrames(videoPath, outputDir, 5)
 	if err != nil {
 		return err
@@ -83,7 +78,7 @@ func processVideo(videoPath, outputDir string) error {
 	for _, frame := range frames {
 		framePath := filepath.Join(outputDir, frame)
 		fmt.Printf("Analyzing frame: %s\n", frame)
-		analysis, err := analyzeImage(framePath)
+		analysis, err := analyzeImage(ctx, agent, framePath)
 		if err != nil {
 			return err
 		}
@@ -94,10 +89,40 @@ func processVideo(videoPath, outputDir string) error {
 }
 
 func main() {
+	ctx := context.Background()
+
+	// Configure logger
+	logger := slog.New(
+		tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+		}),
+	)
+
+	// Set up Ollama provider
+	opts := &ollama.ProviderOpts{
+		Logger:  logger,
+		BaseURL: "http://localhost",
+		Port:    11434,
+	}
+	provider := ollama.NewProvider(opts)
+	provider.UseModel(ctx, "llama3.2-11b-vision")
+
+	// Create agent configuration
+	agentConf := &agent.NewAgentConfig{
+		Provider:     provider,
+		Logger:       logger,
+		SystemPrompt: "You are a visual analysis assistant specialized in detailed image descriptions",
+	}
+
+	// Initialize agent
+	visionAgent := agent.NewAgent(agentConf)
+
+	// Process video
 	videoPath := "path/to/your/video.mp4"
 	outputDir := "output_frames"
 
-	err := processVideo(videoPath, outputDir)
+	err := processVideo(ctx, visionAgent, videoPath, outputDir)
 	if err != nil {
 		log.Fatal(err)
 	}
