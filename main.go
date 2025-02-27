@@ -21,21 +21,62 @@ import (
 )
 
 func extractFrames(videoPath, outputDir string, interval int) error {
+	// Check if video file exists
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		return fmt.Errorf("video file does not exist at path: '%s'", videoPath)
+	}
+
+	// Create base output directory if it doesn't exist
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
 		err := os.MkdirAll(outputDir, 0755)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create output directory '%s': %v", outputDir, err)
 		}
 	}
 
+	// Create a subfolder with the video's name
+	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	frameDirPath := filepath.Join(outputDir, videoName)
+
+	// Check if frames already exist in the subfolder
+	if files, err := os.ReadDir(frameDirPath); err == nil && len(files) > 0 {
+		// Count the number of jpg files
+		frameCount := 0
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") {
+				frameCount++
+			}
+		}
+
+		if frameCount > 0 {
+			fmt.Printf("Frames already exist in %s. Skipping extraction. Found %d frames.\n", frameDirPath, frameCount)
+			return nil
+		}
+	}
+
+	// Create the frame directory
+	if err := os.MkdirAll(frameDirPath, 0755); err != nil {
+		return fmt.Errorf("failed to create frame directory '%s': %v", frameDirPath, err)
+	}
+
+	fmt.Printf("Extracting frames from '%s' to '%s' at %d second intervals...\n", videoPath, frameDirPath, interval)
+
+	// Extract frames using ffmpeg
 	ffmpegCommand := exec.Command(
 		"ffmpeg",
 		"-i", videoPath,
 		"-vf", fmt.Sprintf("fps=1/%d", interval),
-		fmt.Sprintf("%s/frame_%%04d.jpg", outputDir),
+		fmt.Sprintf("%s/frame_%%04d.jpg", frameDirPath),
 	)
 
-	return ffmpegCommand.Run()
+	// Capture output for better error reporting
+	output, err := ffmpegCommand.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg failed: %v\nOutput: %s", err, string(output))
+	}
+
+	fmt.Printf("Successfully extracted frames to %s\n", frameDirPath)
+	return nil
 }
 
 func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
@@ -53,34 +94,53 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
+	fmt.Printf("Processing video: '%s'\n", videoPath)
+	
 	err := extractFrames(videoPath, outputDir, 5)
 	if err != nil {
 		return err
 	}
 
-	files, err := os.ReadDir(outputDir)
+	// Get the subfolder path that contains the frames
+	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	frameDirPath := filepath.Join(outputDir, videoName)
+
+	files, err := os.ReadDir(frameDirPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read frames directory '%s': %v", frameDirPath, err)
+	}
+
+	if len(files) == 0 {
+		return fmt.Errorf("no frames found in directory '%s'", frameDirPath)
 	}
 
 	var frames []string
 	for _, file := range files {
-		if strings.HasSuffix(file.Name(), ".jpg") {
+		if !file.IsDir() && strings.HasSuffix(strings.ToLower(file.Name()), ".jpg") {
 			frames = append(frames, file.Name())
 		}
 	}
+	
+	if len(frames) == 0 {
+		return fmt.Errorf("no JPEG frames found in directory '%s'", frameDirPath)
+	}
+	
+	fmt.Printf("Found %d frames to analyze\n", len(frames))
 	sort.Strings(frames)
 
-	for _, frame := range frames {
-		framePath := filepath.Join(outputDir, frame)
-		fmt.Printf("Analyzing frame: %s\n", frame)
+	for i, frame := range frames {
+		framePath := filepath.Join(frameDirPath, frame)
+		fmt.Printf("\n===== Analyzing frame %d/%d: %s =====\n", i+1, len(frames), frame)
+		
 		analysis, err := analyzeImage(ctx, a, framePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to analyze frame '%s': %v", framePath, err)
 		}
+		
 		fmt.Printf("Analysis: %s\n\n", analysis)
 	}
 
+	fmt.Printf("\nSuccessfully processed all %d frames from video '%s'\n", len(frames), videoPath)
 	return nil
 }
 
@@ -89,17 +149,17 @@ func main() {
 
 	// Configure logger
 	logger := slog.New(
-			tint.NewHandler(os.Stderr, &tint.Options{
-					Level:      slog.LevelDebug,
-					TimeFormat: time.Kitchen,
-			}),
+		tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+		}),
 	)
 
 	// Set up Ollama provider
 	opts := &ollama.ProviderOpts{
-			Logger:  logger,
-			BaseURL: "http://localhost",
-			Port:    11434,
+		Logger:  logger,
+		BaseURL: "http://localhost",
+		Port:    11434,
 	}
 	provider := ollama.NewProvider(opts)
 
@@ -127,5 +187,5 @@ func main() {
 	if err != nil {
 		log.Printf("Error processing video: %v", err)
 		os.Exit(1)
-}
+	}
 }
