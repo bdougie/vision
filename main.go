@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +20,44 @@ import (
 
 	"github.com/lmittmann/tint"
 )
+
+type AnalysisResult struct {
+	Frame   string `json:"frame"`
+	Content string `json:"content"`
+}
+
+func saveAnalysisResult(outputDir, videoName string, result AnalysisResult) error {
+	resultsFilePath := filepath.Join(outputDir, videoName, "analysis_results.json")
+
+	var results []AnalysisResult
+
+	// Read existing results if the file exists
+	if _, err := os.Stat(resultsFilePath); err == nil {
+		file, err := os.ReadFile(resultsFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to read results file: %v", err)
+		}
+		if err := json.Unmarshal(file, &results); err != nil {
+			return fmt.Errorf("failed to unmarshal results: %v", err)
+		}
+	}
+
+	// Append new result
+	results = append(results, result)
+
+	// Write updated results to file
+	file, err := os.Create(resultsFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create results file: %v", err)
+	}
+	defer file.Close()
+
+	if err := json.NewEncoder(file).Encode(results); err != nil {
+		return fmt.Errorf("failed to encode results: %v", err)
+	}
+
+	return nil
+}
 
 func extractFrames(videoPath, outputDir string, interval int) error {
 	// Check if video file exists
@@ -79,7 +118,7 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 	return nil
 }
 
-func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
+func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath, outputDir, videoName string) (string, error) {
 	// Create vision prompt with image data
 	response := a.Run(
 		ctx,
@@ -90,7 +129,18 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) 
 		return "", response.Err
 	}
 
-	return response.Messages[0].Content, nil
+	content := response.Messages[0].Content
+
+	// Save analysis result
+	result := AnalysisResult{
+		Frame:   filepath.Base(imagePath),
+		Content: content,
+	}
+	if err := saveAnalysisResult(outputDir, videoName, result); err != nil {
+		return "", err
+	}
+
+	return content, nil
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
@@ -132,7 +182,7 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
 		framePath := filepath.Join(frameDirPath, frame)
 		fmt.Printf("\n===== Analyzing frame %d/%d: %s =====\n", i+1, len(frames), frame)
 		
-		analysis, err := analyzeImage(ctx, a, framePath)
+		analysis, err := analyzeImage(ctx, a, framePath, outputDir, videoName)
 		if err != nil {
 			return fmt.Errorf("failed to analyze frame '%s': %v", framePath, err)
 		}
