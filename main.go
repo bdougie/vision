@@ -39,23 +39,17 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 }
 
 func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath string) (string, error) {
-	imageData, err := os.ReadFile(imagePath)
-	if (err != nil) {
-		return "", err
-	}
-
 	// Create vision prompt with image data
-	prompt := fmt.Sprintf(`[
-		{"type": "text", "text": "Describe this image in detail."},
-		{"type": "image", "source": {"data": "%s", "media_type": "image/jpeg"}}
-	]`, imageData)
-
-	response, err := a.Run(ctx, prompt, agent.DefaultStopCondition)
-	if err != nil {
-		return "", err
+	response := a.Run(
+		ctx,
+		agent.WithInput("Describe this image in detail."),
+		agent.WithImagePath(imagePath),
+	)
+	if response.Err != nil {
+		return "", response.Err
 	}
 
-	return response[0].Message.Content, nil
+	return response.Messages[0].Content, nil
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
