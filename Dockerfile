@@ -1,5 +1,8 @@
 # Use the official Go image as the base image
-FROM golang:1.24 as builder
+FROM golang:1.21-alpine
+
+# Install ffmpeg and build dependencies
+RUN apk add --no-cache ffmpeg gcc musl-dev
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -14,25 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go binary
-RUN go build -o vision-frame-analyzer main.go
+RUN go build -o vision-analyzer
 
-# Use a lightweight image for the final container
-FROM debian:bookworm-slim
-
-# Install FFmpeg (needed for frame extraction)
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
-
-# Set the working directory inside the container
-WORKDIR /app
-
-# Copy the built binary from the builder stage
-COPY --from=builder /app/vision-frame-analyzer /app/vision-frame-analyzer
-
-# Set execution permissions
-RUN chmod +x /app/vision-frame-analyzer
-
-# Set the default command to run the application
-ENTRYPOINT ["/app/vision-frame-analyzer"]
-
-# Default arguments (can be overridden at runtime)
-CMD ["--video", "input.mp4", "--output", "output_frames"]
+# Set the entrypoint
+ENTRYPOINT ["./vision-analyzer"]
