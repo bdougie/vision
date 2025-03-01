@@ -38,14 +38,46 @@ go run main.go --video input.mp4 --output frames
 ```
 
 ## 📂 Folder Structure
-When you run the analysis, the frames extracted from the video will be stored in a subfolder within the specified output directory. The subfolder will be named after the video file (without the extension). For example:
+When you run the analysis, the following structure will be created:
 ```
 output_frames/
 └── video_name/
     ├── frame_0001.jpg
     ├── frame_0002.jpg
+    ├── analysis_results.json
     └── ...
 ```
+
+The `analysis_results.json` file contains the AI analysis for each frame in JSON format:
+```json
+[
+  {
+    "frame": "frame_0001.jpg",
+    "content": "Description of the first frame..."
+  },
+  {
+    "frame": "frame_0002.jpg",
+    "content": "Description of the second frame..."
+  }
+]
+```
+
+## 🛠 Usage
+
+```sh
+# Basic usage
+go run main.go --video path/to/video.mp4
+
+# Specify custom output directory
+go run main.go --video path/to/video.mp4 --output custom_output
+
+# Show help
+go run main.go --help
+```
+
+Available flags:
+- `--video`: Path to the video file (required)
+- `--output`: Directory to store extracted frames (default: "output_frames")
 
 ## 📌 Use Cases
 
