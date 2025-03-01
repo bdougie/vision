@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/agent-api/core/pkg/agent"
@@ -293,6 +294,9 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
 	var wg sync.WaitGroup
 	batch := &AnalysisResultBatch{}
 
+	remainingFrames := atomic.Int64{}
+	remainingFrames.Store(int64(len(frames)))
+
 	// Start worker pool
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
@@ -309,7 +313,10 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
 				resultsChan <- AnalysisResult{
 					Frame:   work.framePath,
 					Content: analysis,
-				}
+					}
+				
+				remaining := remainingFrames.Add(-1)
+				fmt.Printf("\rRemaining frames to analyze: %d/%d", remaining, len(frames))
 			}
 		}()
 	}
