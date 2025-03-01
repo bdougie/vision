@@ -52,13 +52,13 @@ docker run -v $(pwd):/data vision-analyzer --video /data/input.mp4 --output /dat
 ### Basic Usage
 ```sh
 # Basic usage
-go run main.go --video path/to/video.mp4
+go run *.go --video path/to/video.mp4
 
 # Specify custom output directory
-go run main.go --video path/to/video.mp4 --output custom_output
+go run *.go --video path/to/video.mp4 --output custom_output
 
 # Show help
-go run main.go --help
+go run *.go --help
 ```
 
 ## 📂 Output Structure
