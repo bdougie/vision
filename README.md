@@ -27,7 +27,7 @@ VisionFrameAnalyzer is a Go-based tool that:
 brew install ffmpeg
 go mod tidy
 ```
-##2️⃣ Run the Analysis
+### **2️⃣ Run the Analysis**
 ```sh
 go run main.go --video path/to/video.mp4 --output output_frames
 ```
@@ -37,11 +37,53 @@ go run main.go --video path/to/video.mp4 --output output_frames
 go run main.go --video input.mp4 --output frames
 ```
 
+## 📂 Folder Structure
+When you run the analysis, the following structure will be created:
+```
+output_frames/
+└── video_name/
+    ├── frame_0001.jpg
+    ├── frame_0002.jpg
+    ├── analysis_results.json
+    └── ...
+```
+
+The `analysis_results.json` file contains the AI analysis for each frame in JSON format:
+```json
+[
+  {
+    "frame": "frame_0001.jpg",
+    "content": "Description of the first frame..."
+  },
+  {
+    "frame": "frame_0002.jpg",
+    "content": "Description of the second frame..."
+  }
+]
+```
+
+## 🛠 Usage
+
+```sh
+# Basic usage
+go run main.go --video path/to/video.mp4
+
+# Specify custom output directory
+go run main.go --video path/to/video.mp4 --output custom_output
+
+# Show help
+go run main.go --help
+```
+
+Available flags:
+- `--video`: Path to the video file (required)
+- `--output`: Directory to store extracted frames (default: "output_frames")
+
 ## 📌 Use Cases
 
-📽️ Automated Video Analysis – Extract insights from video feeds
-🔍 Content Moderation – Detect and describe images in video content
-🛠 Machine Learning Pipelines – Pre-process video datasets for AI models
+📽️ Automated Video Analysis – Extract insights from video feeds  
+🔍 Content Moderation – Detect and describe images in video content  
+🛠 Machine Learning Pipelines – Pre-process video datasets for AI models  
 
 ## 📜 License
 
