@@ -119,28 +119,37 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 }
 
 func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath, outputDir, videoName string) (string, error) {
-	// Create vision prompt with image data
-	response := a.Run(
-		ctx,
-		agent.WithInput("Describe this image in detail."),
-		agent.WithImagePath(imagePath),
-	)
-	if response.Err != nil {
-		return "", response.Err
-	}
+    // Create vision prompt with image data
+    response := a.Run(
+        ctx,
+        agent.WithInput("What is happening in this image? Be specific and detailed. List item and describe items shown in the video."),
+        agent.WithImagePath(imagePath),
+    )
+    if response.Err != nil {
+        return "", response.Err
+    }
 
-	content := response.Messages[0].Content
+    // Extract the actual response content
+    if len(response.Messages) == 0 {
+        return "", fmt.Errorf("no response messages received from model")
+    }
 
-	// Save analysis result
-	result := AnalysisResult{
-		Frame:   filepath.Base(imagePath),
-		Content: content,
-	}
-	if err := saveAnalysisResult(outputDir, videoName, result); err != nil {
-		return "", err
-	}
+    // Get the model's response (not the prompt)
+    content := response.Messages[len(response.Messages)-1].Content
 
-	return content, nil
+    // Debug log to see what we're getting
+    fmt.Printf("Raw response content: %s\n", content)
+
+    // Save analysis result
+    result := AnalysisResult{
+        Frame:   filepath.Base(imagePath),
+        Content: content,
+    }
+    if err := saveAnalysisResult(outputDir, videoName, result); err != nil {
+        return "", err
+    }
+
+    return content, nil
 }
 
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
