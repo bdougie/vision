@@ -20,50 +20,36 @@ VisionFrameAnalyzer is a Go-based tool that:
 - **Slog + Tint** (Logging)  
 - **Kubernetes Ready** (Optional Multi-Cluster Support)  
 
-## 📦 Installation & Setup  
-### **1️⃣ Install Dependencies**  
+## 📦 Installation & Setup
+
+### Option 1: Local Installation
 #### **MacOS (Homebrew)**
 ```sh
 brew install ffmpeg
+brew install ollama
 go mod tidy
 ```
-### **2️⃣ Run the Analysis**
+
+### Option 2: Docker Installation
 ```sh
-go run main.go --video path/to/video.mp4 --output output_frames
+# Build the container
+docker build -t vision-analyzer .
+
+# Run the container
+docker run -v $(pwd):/data vision-analyzer --video /data/input.mp4 --output /data/frames
 ```
 
-## 🛠 Usage Example
-```
-go run main.go --video input.mp4 --output frames
-```
+## 🔧 Configuration & Usage
 
-## 📂 Folder Structure
-When you run the analysis, the following structure will be created:
-```
-output_frames/
-└── video_name/
-    ├── frame_0001.jpg
-    ├── frame_0002.jpg
-    ├── analysis_results.json
-    └── ...
-```
+### Ollama Setup
+1. Ensure Ollama is running locally on port 11434
+2. The tool uses `llama3.2-vision:11b` model by default
 
-The `analysis_results.json` file contains the AI analysis for each frame in JSON format:
-```json
-[
-  {
-    "frame": "frame_0001.jpg",
-    "content": "Description of the first frame..."
-  },
-  {
-    "frame": "frame_0002.jpg",
-    "content": "Description of the second frame..."
-  }
-]
-```
+### Command Line Flags
+- `--video`: Path to input video file (required)
+- `--output`: Output directory for frames (default: "output_frames")
 
-## 🛠 Usage
-
+### Basic Usage
 ```sh
 # Basic usage
 go run main.go --video path/to/video.mp4
@@ -75,9 +61,26 @@ go run main.go --video path/to/video.mp4 --output custom_output
 go run main.go --help
 ```
 
-Available flags:
-- `--video`: Path to the video file (required)
-- `--output`: Directory to store extracted frames (default: "output_frames")
+## 📂 Output Structure
+```
+output_frames/
+└── video_name/
+    ├── frame_0001.jpg
+    ├── frame_0002.jpg
+    ├── analysis_results.json
+    └── ...
+```
+
+### Analysis Results Format
+The `analysis_results.json` file contains frame-by-frame analysis:
+```json
+[
+  {
+    "frame": "frame_0001.jpg",
+    "content": "Detailed analysis of frame contents..."
+  }
+]
+```
 
 ## 📌 Use Cases
 
