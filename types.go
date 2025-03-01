@@ -30,8 +30,8 @@ func (batch *AnalysisResultBatch) addResult(result AnalysisResult) {
 	batch.results = append(batch.results, result)
 
 	// Write to disk when batch is full
-	if len(batch.results) >= batchSize {
-		if err := batch.flush(outputDir, videoName); err != nil {
+	if len(batch.results) >= BatchSize {
+		if err := batch.flush(OutputDir, VideoName); err != nil {
 			log.Printf("Error flushing results: %v", err)
 		}
 	}

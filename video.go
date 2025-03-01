@@ -59,7 +59,7 @@ func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputD
 	remainingFrames.Store(int64(len(frames)))
 
 	// Start worker pool
-	for i := 0; i < maxWorkers; i++ {
+	for i := 0; i < MaxWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
