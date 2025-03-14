@@ -202,13 +202,15 @@ func extractFrames(videoPath, outputDir string, interval int) error {
 			framePath := filepath.Join(frameDirPath, fmt.Sprintf("frame_%04d.jpg", frameNum))
 			frameNum++
 
-			// Save frame asynchronously
-			go func(data []byte, path string) {
-				if err := os.WriteFile(path, data, 0644); err != nil {
-					log.Printf("Error saving frame: %v", err)
-				}
-				frameChan <- path
-				}(buffer[:n], framePath)
+				// Save frame asynchronously
+				tempBuffer := make([]byte, n)
+				copy(tempBuffer, buffer[:n])
+				go func(data []byte, path string) {
+					if err := os.WriteFile(path, data, 0644); err != nil {
+						log.Printf("Error saving frame: %v", err)
+					}
+					frameChan <- path
+				}(tempBuffer, framePath)
 			}
 		}()
 
