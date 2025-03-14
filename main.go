@@ -63,6 +63,8 @@ func (batch *AnalysisResultBatch) addResult(result AnalysisResult) {
 }
 
 func (batch *AnalysisResultBatch) flush(outputDir, videoName string) error {
+	batch.mu.Lock()
+	defer batch.mu.Unlock()
 	if len(batch.results) == 0 {
 		return nil
 	}
