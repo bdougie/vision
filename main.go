@@ -259,7 +259,7 @@ func analyzeImage(ctx context.Context, a *agent.DefaultAgent, imagePath, outputD
 func processVideo(ctx context.Context, a *agent.DefaultAgent, videoPath, outputDir string) error {
 	fmt.Printf("Processing video: '%s'\n", videoPath)
 
-	err := extractFrames(videoPath, outputDir, 5)
+	err := extractFrames(videoPath, outputDir, 15)
 	if err != nil {
 		return err
 	}
