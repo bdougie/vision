@@ -1,14 +1,6 @@
-github.com/agent-api/core v0.0.0-20250214035826-39f6f4564911 h1:fN2X6Oa3+krpq4HNvZRQ1czX1ipcduWMtAh2ORECCWg=
-github.com/agent-api/core v0.0.0-20250214035826-39f6f4564911/go.mod h1:dubJb1P6cSuYOqQvBX/R9inWvHPMDuXCEwqwZfzXWTk=
-github.com/agent-api/core v0.0.0-20250223175956-2857a6b184d4 h1:8wHf0Y1Cul2XLA9BHow44DYGk3TaeSeabXkdA9jGnyw=
-github.com/agent-api/core v0.0.0-20250223175956-2857a6b184d4/go.mod h1:dubJb1P6cSuYOqQvBX/R9inWvHPMDuXCEwqwZfzXWTk=
 github.com/agent-api/core v0.0.0-20250227162826-246be7c4b3ff h1:6oife6RpbYLDLkLJw6iXJkGAJsbX4b3cbnkRYx3Ton4=
 github.com/agent-api/core v0.0.0-20250227162826-246be7c4b3ff/go.mod h1:dubJb1P6cSuYOqQvBX/R9inWvHPMDuXCEwqwZfzXWTk=
-github.com/agent-api/ollama v0.0.0-20250223180518-bba8d39aacef h1:WtycvIuIHwsTC6Ac7ankOlSC/0MQ3DHO4ouSp/VNvio=
-github.com/agent-api/ollama v0.0.0-20250223180518-bba8d39aacef/go.mod h1:QB+jsdfO+B5nUs4Ihc1O7VzGD39qpFv2An67O7EiYT8=
 github.com/agent-api/ollama v0.0.0-20250227163112-f9059ce0e517 h1:TbVxw+SR//ay95HYTHmdXjWTknAFNQTYlb6QHpsWzVE=
 github.com/agent-api/ollama v0.0.0-20250227163112-f9059ce0e517/go.mod h1:tVh9zEHas5qKT8mbnnG/40xjZbVYqrDy5etlmgOhbvQ=
 github.com/lmittmann/tint v1.0.7 h1:D/0OqWZ0YOGZ6AyC+5Y2kD8PBEzBk6rFHVSfOqCkF9Y=
 github.com/lmittmann/tint v1.0.7/go.mod h1:HIS3gSy7qNwGCj+5oRjAutErFBl4BzdQP6cJZ0NfMwE=
-golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa h1:t2QcU6V556bFjYgu4L6C+6VrCPyJZ+eyRsABUPs1mz4=
-golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa/go.mod h1:BHOTPb3L19zxehTsLoJXVaTktb06DFgmdW6Wb9s8jqk=

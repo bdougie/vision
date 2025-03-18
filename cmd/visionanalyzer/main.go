@@ -8,13 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lmittmann/tint"
 	"log/slog"
 
-	"visionframeanalyzer/internal/analyzer"
-	"visionframeanalyzer/internal/extractor"
-	"visionframeanalyzer/internal/models"
-	"visionframeanalyzer/internal/storage"
+	"github.com/lmittmann/tint"
+
+	"github.com/bdougie/vision/internal/analyzer"
+	"github.com/bdougie/vision/internal/storage"
 )
 
 func main() {
