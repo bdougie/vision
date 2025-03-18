@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 
 	"github.com/agent-api/core/pkg/agent"
-	"visionframeanalyzer/internal/extractor"
-	"visionframeanalyzer/internal/models"
-	"visionframeanalyzer/internal/storage"
+	"github.com/bdougie/vision/internal/extractor"
+	"github.com/bdougie/vision/internal/models"
+	"github.com/bdougie/vision/internal/storage"
 )
 
 const maxWorkers = 4 // Adjust based on your CPU cores

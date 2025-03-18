@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"visionframeanalyzer/internal/models"
+	"github.com/bdougie/vision/internal/models"
 )
 
 const batchSize = 10 // Number of results to batch write
