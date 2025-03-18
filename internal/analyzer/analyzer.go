@@ -135,8 +135,12 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	}
 
 	// Check for any errors
-	if len(errorsChan) > 0 {
-		return fmt.Errorf("encountered errors during processing: %v", <-errorsChan)
+	var errorMessages []string
+	for err := range errorsChan {
+		errorMessages = append(errorMessages, err.Error())
+	}
+	if len(errorMessages) > 0 {
+		return fmt.Errorf("encountered errors during processing: %v", strings.Join(errorMessages, "; "))
 	}
 
 	return nil
