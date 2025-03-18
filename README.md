@@ -82,6 +82,18 @@ The `analysis_results.json` file contains frame-by-frame analysis:
 ]
 ```
 
+## 📁 Project Structure
+```
+vision/
+├── cmd/
+│   └── visionanalyzer/      # Main executable package
+├── internal/
+│   ├── analyzer/            # AI vision analysis functionality
+│   ├── extractor/           # Video frame extraction functionality
+│   ├── models/              # Shared data structures
+│   └── storage/             # Result storage and persistence
+```
+
 ## 📌 Use Cases
 
 📽️ Automated Video Analysis – Extract insights from video feeds  
