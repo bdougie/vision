@@ -22,6 +22,25 @@ VisionFrameAnalyzer is a Go-based tool that:
 
 ## 📦 Installation & Setup
 
+### Prerequisites
+- Go (1.21+ recommended)
+- FFmpeg
+- Ollama
+
+If you don't have Go installed or are experiencing GOROOT issues, install/fix it first:
+```sh
+# macOS with Homebrew
+brew install go
+
+# Verify installation
+go version
+
+# If you see GOROOT errors, set it explicitly in your shell profile
+echo 'export GOROOT=$(brew --prefix go)/libexec' >> ~/.zshrc  # or ~/.bash_profile
+echo 'export PATH=$PATH:$GOROOT/bin:$HOME/go/bin' >> ~/.zshrc
+source ~/.zshrc  # or source ~/.bash_profile
+```
+
 ### Option 1: Local Installation
 #### **MacOS (Homebrew)**
 ```sh
@@ -30,7 +49,20 @@ brew install ollama
 go mod tidy
 ```
 
-### Option 2: Docker Installation
+### Option 2: Run Directly (No Installation)
+```sh
+# Navigate to project directory
+cd /path/to/vision
+
+# Build and run in one step
+go run ./cmd/visionanalyzer --video path/to/video.mp4 --output output_directory
+
+# Or build an executable and run it
+go build -o ./bin/visionanalyzer ./cmd/visionanalyzer
+./bin/visionanalyzer --video path/to/video.mp4 --output output_directory
+```
+
+### Option 3: Docker Installation
 ```sh
 # Build the container
 docker build -t vision-analyzer .
@@ -51,11 +83,16 @@ docker run -v $(pwd):/data vision-analyzer --video /data/input.mp4 --output /dat
 
 ### Basic Usage
 ```sh
-# Basic usage
-go run main.go --video path/to/video.mp4
+# Build and run directly
+go build -o visionanalyzer ./cmd/visionanalyzer
+./visionanalyzer --video path/to/video.mp4
+
+# Or run without building
+go run ./cmd/visionanalyzer --video path/to/video.mp4
 
 # Specify custom output directory
-go run main.go --video path/to/video.mp4 --output custom_output
+./visionanalyzer --video path/to/video.mp4 --output custom_output
+```
 
 # Show help
 go run main.go --help
@@ -80,6 +117,18 @@ The `analysis_results.json` file contains frame-by-frame analysis:
     "content": "Detailed analysis of frame contents..."
   }
 ]
+```
+
+## 📁 Project Structure
+```
+vision/
+├── cmd/
+│   └── visionanalyzer/      # Main executable package
+├── internal/
+│   ├── analyzer/            # AI vision analysis functionality
+│   ├── extractor/           # Video frame extraction functionality
+│   ├── models/              # Shared data structures
+│   └── storage/             # Result storage and persistence
 ```
 
 ## 📌 Use Cases
