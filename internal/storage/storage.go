@@ -60,7 +60,9 @@ func (s *Storage) flush() error {
 
 	var existingResults []models.AnalysisResult
 	if data, err := os.ReadFile(resultsFilePath); err == nil {
-		json.Unmarshal(data, &existingResults)
+		if err := json.Unmarshal(data, &existingResults); err != nil {
+			return fmt.Errorf("failed to unmarshal existing results: %v", err)
+		}
 	}
 
 	allResults := append(existingResults, s.results...)
