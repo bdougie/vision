@@ -19,100 +19,148 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+    // Initialize flag package before using it
+    searchQuery := flag.String("search", "", "Search for frames matching this description")
+    searchLimit := flag.Int("limit", 5, "Maximum number of search results")
+    videoPathFlag := flag.String("video", "", "Path to the video file")
+    outputDirFlag := flag.String("output", "output_frames", "Output directory for frames")
+    flag.Parse()
 
-	// Configure logger
-	logger := logr.FromSlogHandler(
-		tint.NewHandler(os.Stderr, &tint.Options{
-			Level:      slog.LevelDebug,
-			TimeFormat: "15:04:05",
-		}),
-	)
+    ctx := context.Background()
 
-	// Parse command line arguments
-	videoPath := "path/to/your/video.mp4"
-	outputDir := "output_frames" // default value
+    // Configure logger
+    logger := logr.FromSlogHandler(
+        tint.NewHandler(os.Stderr, &tint.Options{
+            Level:      slog.LevelDebug,
+            TimeFormat: "15:04:05",
+        }),
+    )
 
-	for i := 1; i < len(os.Args); i++ {
-		switch os.Args[i] {
-		case "--video":
-			if i+1 < len(os.Args) {
-				videoPath = os.Args[i+1]
-				i++
-			}
-		case "--output":
-			if i+1 < len(os.Args) {
-				outputDir = os.Args[i+1]
-				i++
-			}
-		}
-	}
+    // Get video path from flags or command line arguments
+    videoPath := *videoPathFlag
+    outputDir := *outputDirFlag
 
-	// Ensure video path is provided
-	if videoPath == "path/to/your/video.mp4" {
-		fmt.Println("Usage: visionanalyzer --video path/to/video.mp4 [--output output_directory]")
-		os.Exit(1)
-	}
+    // For backward compatibility, also support parsing from os.Args
+    if videoPath == "" {
+        for i := 1; i < len(os.Args); i++ {
+            switch os.Args[i] {
+            case "--video":
+                if i+1 < len(os.Args) {
+                    videoPath = os.Args[i+1]
+                    i++
+                }
+            case "--output":
+                if i+1 < len(os.Args) {
+                    outputDir = os.Args[i+1]
+                    i++
+                }
+            }
+        }
+    }
 
-	// After parsing the video path, set the videoName
-	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+    // Ensure video path is provided
+    if videoPath == "" {
+        fmt.Println("Usage: visionanalyzer --video path/to/video.mp4 [--output output_directory]")
+        os.Exit(1)
+    }
 
-	// Initialize the storage
-	store := storage.NewStorage(outputDir, videoName)
+    // Check if PostgreSQL is enabled
+    dbEnabled := os.Getenv("DB_ENABLED") == "true"
 
-	// Initialize agent
-	visionAgent, err := analyzer.NewAgent(ctx, &logger)
-	if err != nil {
-		log.Fatalf("Failed to initialize vision agent: %v", err)
-	}
+    // After parsing the video path, set the videoName
+    videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 
-	// Process video
-	fmt.Printf("Starting video analysis...\n")
-	processor := analyzer.NewProcessor(visionAgent, store)
-	err = processor.ProcessVideo(ctx, videoPath, outputDir)
-	if err != nil {
-		log.Printf("Error processing video: %v", err)
-		os.Exit(1)
-	}
+    // Initialize the appropriate storage
+    var store storage.Storage
+    if dbEnabled {
+        // Get PostgreSQL configuration from environment
+        pgConfig := storage.PostgresConfig{
+            Host:     getEnvOrDefault("DB_HOST", "localhost"),
+            Port:     getEnvOrDefault("DB_PORT", "5432"),
+            User:     getEnvOrDefault("DB_USER", "postgres"),
+            Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+            DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
+        }
 
-	fmt.Println("Video processing completed successfully!")
+        // Initialize database schema if needed
+        if err := storage.InitSchema(ctx, pgConfig); err != nil {
+            log.Fatalf("Failed to initialize database schema: %v", err)
+        }
 
-	// Add these flags to your main function
-	searchQuery := flag.String("search", "", "Search for frames matching this description")
-	searchLimit := flag.Int("limit", 5, "Maximum number of search results")
-	flag.Parse()
+        // Create PostgreSQL storage
+        pgStorage, err := storage.NewPostgresStorage(ctx, pgConfig, videoName)
+        if err != nil {
+            log.Fatalf("Failed to create PostgreSQL storage: %v", err)
+        }
+        defer pgStorage.Close()
+        store = pgStorage
+    } else {
+        // Use file-based storage
+        store = storage.NewFileStorage(outputDir, videoName)
+    }
 
-	// Add this after processing video
-	if *searchQuery != "" && dbEnabled {
-		fmt.Printf("Searching for frames matching: %s\n", *searchQuery)
+    // Initialize agent
+    visionAgent, err := analyzer.NewAgent(ctx, &logger)
+    if err != nil {
+        log.Fatalf("Failed to initialize vision agent: %v", err)
+    }
 
-		// Get PostgreSQL configuration
-		pgConfig := storage.PostgresConfig{
-			Host:     getEnvOrDefault("DB_HOST", "localhost"),
-			Port:     getEnvOrDefault("DB_PORT", "5432"),
-			User:     getEnvOrDefault("DB_USER", "postgres"),
-			Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
-			DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
-		}
+    // Process video
+    fmt.Printf("Starting video analysis...\n")
+    processor := analyzer.NewProcessor(visionAgent, store)
+    err = processor.ProcessVideo(ctx, videoPath, outputDir)
+    if err != nil {
+        log.Printf("Error processing video: %v", err)
+        os.Exit(1)
+    }
 
-		// Create PostgreSQL storage
-		pgStorage, err := storage.NewPostgresStorage(ctx, pgConfig, videoName)
-		if err != nil {
-			log.Fatalf("Failed to create PostgreSQL storage: %v", err)
-		}
-		defer pgStorage.Close()
+    fmt.Println("Video processing completed successfully!")
 
-		// Search for similar frames
-		results, err := pgStorage.SearchSimilarFrames(ctx, *searchQuery, *searchLimit)
-		if err != nil {
-			log.Fatalf("Failed to search for similar frames: %v", err)
-		}
+    // Handle search query if provided and DB is enabled
+    if *searchQuery != "" && dbEnabled {
+        fmt.Printf("Searching for frames matching: %s\n", *searchQuery)
 
-		// Display results
-		fmt.Printf("Found %d matching frames:\n", len(results))
-		for i, result := range results {
-			fmt.Printf("%d. Frame %d (%.2f%% similarity)\n", i+1, result.FrameNumber, result.Similarity*100)
-			fmt.Printf("   Description: %s\n\n", result.Description)
-		}
-	}
+        // Get PostgreSQL configuration
+        pgConfig := storage.PostgresConfig{
+            Host:     getEnvOrDefault("DB_HOST", "localhost"),
+            Port:     getEnvOrDefault("DB_PORT", "5432"),
+            User:     getEnvOrDefault("DB_USER", "postgres"),
+            Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+            DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
+        }
+
+        // Create PostgreSQL storage for search (if not already created)
+        var pgStorage *storage.PostgresStorage
+        if s, ok := store.(*storage.PostgresStorage); ok {
+            pgStorage = s
+        } else {
+            var err error
+            pgStorage, err = storage.NewPostgresStorage(ctx, pgConfig, videoName)
+            if err != nil {
+                log.Fatalf("Failed to create PostgreSQL storage: %v", err)
+            }
+            defer pgStorage.Close()
+        }
+
+        // Search for similar frames
+        results, err := pgStorage.SearchSimilarFrames(ctx, *searchQuery, *searchLimit)
+        if err != nil {
+            log.Fatalf("Failed to search for similar frames: %v", err)
+        }
+
+        // Display results
+        fmt.Printf("Found %d matching frames:\n", len(results))
+        for i, result := range results {
+            fmt.Printf("%d. Frame %d (%.2f%% similarity)\n", i+1, result.FrameNumber, result.Similarity*100)
+            fmt.Printf("   Description: %s\n\n", result.Description)
+        }
+    }
+}
+
+// Helper function to get environment variables with defaults
+func getEnvOrDefault(key, defaultValue string) string {
+    if value, exists := os.LookupEnv(key); exists {
+        return value
+    }
+    return defaultValue
 }

@@ -20,10 +20,10 @@ const maxWorkers = 4 // Adjust based on your CPU cores
 
 type Processor struct {
 	agent   *agent.Agent
-	storage *storage.Storage
+	storage storage.Storage
 }
 
-func NewProcessor(agent *agent.Agent, storage *storage.Storage) *Processor {
+func NewProcessor(agent *agent.Agent, storage storage.Storage) *Processor {
 	return &Processor{
 		agent:   agent,
 		storage: storage,
@@ -67,7 +67,7 @@ func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir strin
 		store = pgStorage
 	} else {
 		// Use file-based storage if PostgreSQL is not enabled
-		store = storage.NewStorage(outputDir, videoName)
+		store = storage.NewFileStorage(outputDir, videoName)
 	}
 
 	// Extract frames
@@ -103,10 +103,10 @@ func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir strin
 	sort.Strings(frames)
 
 	// Process frames
-	return p.processFrames(ctx, frames, frameDirPath)
+	return p.processFrames(ctx, frames, frameDirPath, store)
 }
 
-func (p *Processor) processFrames(ctx context.Context, frames []string, frameDirPath string) error {
+func (p *Processor) processFrames(ctx context.Context, frames []string, frameDirPath string, store storage.Storage) error {
 	workChan := make(chan models.WorkItem, len(frames))
 	resultsChan := make(chan models.AnalysisResult, len(frames))
 	errorsChan := make(chan error, len(frames))
@@ -155,7 +155,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	// Collect results
 	go func() {
 		for result := range resultsChan {
-			p.storage.AddResult(result)
+			store.AddResult(ctx, result)
 		}
 	}()
 
@@ -165,7 +165,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	close(errorsChan)
 
 	// Flush any remaining results
-	if err := p.storage.Flush(); err != nil {
+	if err := store.Flush(); err != nil {
 		return fmt.Errorf("failed to flush final results: %v", err)
 	}
 

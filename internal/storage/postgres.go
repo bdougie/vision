@@ -161,6 +161,16 @@ func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisR
     return nil
 }
 
+// Double-check that PostgresStorage implements the Storage interface
+func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisResult) error {
+    // existing implementation...
+}
+
+func (s *PostgresStorage) Flush() error {
+    // existing implementation...
+    return nil
+}
+
 // Flush implements the Storage interface - no-op for Postgres as we save immediately
 func (s *PostgresStorage) Flush() error {
     return nil
