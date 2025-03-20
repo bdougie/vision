@@ -117,53 +117,53 @@ func (s *PostgresStorage) getOrCreateVideo(ctx context.Context, videoName string
 
 // AddResult adds a frame analysis result to the database
 func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisResult) error {
-	// Extract frame number from filename
-	frameName := result.Frame
-	frameNum := 0
-	if _, err := fmt.Sscanf(frameName, "frame_%04d.jpg", &frameNum); err != nil {
-		return fmt.Errorf("invalid frame filename format: %s", frameName)
-	}
-
-	// Calculate timestamp from frame number (15 seconds per frame)
-	timestamp := frameNum * 15
-
-	// First, store the frame information
-	var frameID int
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO frames 
+    // Extract frame number from filename
+    frameName := result.Frame
+    frameNum := 0
+    if _, err := fmt.Sscanf(frameName, "frame_%04d.jpg", &frameNum); err != nil {
+        return fmt.Errorf("invalid frame filename format: %s", frameName)
+    }
+    
+    // Calculate timestamp from frame number (15 seconds per frame)
+    timestamp := frameNum * 15
+    
+    // First, store the frame information
+    var frameID int
+    err := s.pool.QueryRow(ctx,
+        `INSERT INTO frames 
         (video_id, frame_number, frame_path, timestamp, created_at) 
         VALUES ($1, $2, $3, $4, $5) 
         RETURNING id`,
-		s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
-
-	if err != nil {
-		return fmt.Errorf("failed to store frame information: %w", err)
-	}
-
-	// Generate embedding for content
-	embedding, err := s.generateEmbedding(ctx, result.Content)
-	if err != nil {
-		// Log error but continue without embedding
-		fmt.Printf("Warning: Failed to generate embedding: %v\n", err)
-	}
-
-	// Store the analysis result with embedding
-	_, err = s.pool.Exec(ctx,
-		`INSERT INTO analyses 
+        s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
+    
+    if err != nil {
+        return fmt.Errorf("failed to store frame information: %w", err)
+    }
+    
+    // Generate embedding for content
+    embedding, err := s.generateEmbedding(ctx, result.Content)
+    if err != nil {
+        // Log error but continue without embedding
+        fmt.Printf("Warning: Failed to generate embedding: %v\n", err)
+    }
+    
+    // Store the analysis result with embedding
+    _, err = s.pool.Exec(ctx,
+        `INSERT INTO analyses 
         (frame_id, content, embedding, created_at) 
         VALUES ($1, $2, $3, $4)`,
-		frameID, result.Content, pgvector.NewVector(embedding), time.Now())
-
-	if err != nil {
-		return fmt.Errorf("failed to store analysis: %w", err)
-	}
-
-	return nil
+        frameID, result.Content, pgvector.NewVector(embedding), time.Now())
+    
+    if err != nil {
+        return fmt.Errorf("failed to store analysis: %w", err)
+    }
+    
+    return nil
 }
 
 // Flush implements the Storage interface - no-op for Postgres as we save immediately
 func (s *PostgresStorage) Flush() error {
-	return nil
+    return nil
 }
 
 // generateEmbedding creates a vector embedding for the content

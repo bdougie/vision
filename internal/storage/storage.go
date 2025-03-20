@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,8 +13,17 @@ import (
 
 const batchSize = 10 // Number of results to batch write
 
-// Storage manages saving and retrieving analysis results
-type Storage struct {
+// Storage defines the interface for storing analysis results
+type Storage interface {
+	// AddResult adds a single analysis result
+	AddResult(ctx context.Context, result models.AnalysisResult) error
+
+	// Flush ensures all pending results are saved
+	Flush() error
+}
+
+// storageImpl manages saving and retrieving analysis results
+type storageImpl struct {
 	results    []models.AnalysisResult
 	mu         sync.Mutex
 	outputDir  string
@@ -21,8 +31,8 @@ type Storage struct {
 }
 
 // NewStorage creates a new storage manager
-func NewStorage(outputDir, videoName string) *Storage {
-	return &Storage{
+func NewStorage(outputDir, videoName string) *storageImpl {
+	return &storageImpl{
 		results:   []models.AnalysisResult{},
 		outputDir: outputDir,
 		videoName: videoName,
@@ -30,7 +40,7 @@ func NewStorage(outputDir, videoName string) *Storage {
 }
 
 // AddResult adds a result to the batch and flushes if the batch is full
-func (s *Storage) AddResult(result models.AnalysisResult) {
+func (s *storageImpl) AddResult(ctx context.Context, result models.AnalysisResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results = append(s.results, result)
@@ -39,19 +49,21 @@ func (s *Storage) AddResult(result models.AnalysisResult) {
 	if len(s.results) >= batchSize {
 		if err := s.flush(); err != nil {
 			fmt.Printf("Error flushing results: %v\n", err)
+			return err
 		}
 	}
+	return nil
 }
 
 // Flush writes all pending results to disk
-func (s *Storage) Flush() error {
+func (s *storageImpl) Flush() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.flush()
 }
 
 // Internal flush implementation
-func (s *Storage) flush() error {
+func (s *storageImpl) flush() error {
 	if len(s.results) == 0 {
 		return nil
 	}
@@ -90,7 +102,7 @@ func (s *Storage) flush() error {
 }
 
 // SaveResult saves a single result directly to disk
-func (s *Storage) SaveResult(result models.AnalysisResult) error {
+func (s *storageImpl) SaveResult(result models.AnalysisResult) error {
 	resultsFilePath := filepath.Join(s.outputDir, s.videoName, "analysis_results.json")
 
 	var results []models.AnalysisResult
