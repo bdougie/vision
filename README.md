@@ -95,7 +95,23 @@ go run ./cmd/visionanalyzer --video path/to/video.mp4
 ```
 
 # Show help
-go run main.go --help
+./visionanalyzer --help
+
+## 🚀 Quick Start
+
+```bash
+# Process a video
+./visionanalyzer --video path/to/video.mp4
+
+# Specify custom output directory
+./visionanalyzer --video path/to/video.mp4 --output custom_output
+
+# Search for frames containing specific content (requires PostgreSQL)
+export DB_ENABLED=true
+./visionanalyzer --search "person cooking" --limit 10 --video path/to/video.mp4
+
+# Show help
+./visionanalyzer --help
 ```
 
 ## 📂 Output Structure
