@@ -10,7 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/agent-api/core/pkg/agent"
+	"github.com/agent-api/core/agent"
 	"github.com/bdougie/vision/internal/extractor"
 	"github.com/bdougie/vision/internal/models"
 	"github.com/bdougie/vision/internal/storage"
@@ -19,11 +19,11 @@ import (
 const maxWorkers = 4 // Adjust based on your CPU cores
 
 type Processor struct {
-	agent   *agent.DefaultAgent
+	agent   *agent.Agent
 	storage *storage.Storage
 }
 
-func NewProcessor(agent *agent.DefaultAgent, storage *storage.Storage) *Processor {
+func NewProcessor(agent *agent.Agent, storage *storage.Storage) *Processor {
 	return &Processor{
 		agent:   agent,
 		storage: storage,
@@ -37,7 +37,7 @@ func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir strin
 	// Extract frames
 	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 	frameDirPath := filepath.Join(outputDir, videoName)
-	
+
 	err := extractor.ExtractFrames(videoPath, outputDir, 15)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	errorsChan := make(chan error, len(frames))
 
 	var wg sync.WaitGroup
-	
+
 	remainingFrames := atomic.Int64{}
 	remainingFrames.Store(int64(len(frames)))
 
@@ -98,7 +98,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 					Frame:   work.FramePath,
 					Content: analysis,
 				}
-				
+
 				remaining := remainingFrames.Add(-1)
 				fmt.Printf("\rRemaining frames to analyze: %d/%d", remaining, len(frames))
 			}
@@ -148,13 +148,13 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 
 func (p *Processor) analyzeImage(ctx context.Context, imagePath string) (string, error) {
 	// Create vision prompt with image data
-	response := p.agent.Run(
+	response, err := p.agent.Run(
 		ctx,
 		agent.WithInput("What is happening in this image? Be specific and detailed. List item and describe items shown in the video."),
 		agent.WithImagePath(imagePath),
 	)
-	if response.Err != nil {
-		return "", response.Err
+	if err != nil {
+		return "", err
 	}
 
 	// Extract the actual response content
