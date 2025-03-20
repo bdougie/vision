@@ -136,6 +136,63 @@ brew services start postgresql@14
 psql --version
 ```
 
+### Docker Compose Setup
+
+For easy development, you can use Docker Compose to set up PostgreSQL with pgvector:
+
+```yaml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: visiondb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+### PostgreSQL Schema
+
+Create the necessary tables and enable pgvector extension:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE videos (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE frames (
+    id SERIAL PRIMARY KEY,
+    video_id INTEGER REFERENCES videos(id),
+    frame_number INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE analyses (
+    id SERIAL PRIMARY KEY,
+    frame_id INTEGER REFERENCES frames(id),
+    content JSONB,
+    vector VECTOR(768), -- Adjust dimension based on your model
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Vector Similarity Search
+
+The pgvector implementation allows you to search for frames with similar content using vector similarity, which is much more powerful than basic text search.
+
 ## 📁 Project Structure
 ```
 vision/
