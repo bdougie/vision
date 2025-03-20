@@ -119,6 +119,23 @@ The `analysis_results.json` file contains frame-by-frame analysis:
 ]
 ```
 
+## 🛢️ PostgreSQL with pgvector Setup
+
+VisionFrameAnalyzer can store analysis results in PostgreSQL with pgvector for vector similarity search.
+
+### Prerequisites
+
+1. Install PostgreSQL (14+ recommended)
+
+```bash
+# macOS with Homebrew
+brew install postgresql@14
+brew services start postgresql@14
+
+# Verify installation
+psql --version
+```
+
 ## 📁 Project Structure
 ```
 vision/

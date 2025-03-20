@@ -34,8 +34,43 @@ func NewProcessor(agent *agent.Agent, storage *storage.Storage) *Processor {
 func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir string) error {
 	fmt.Printf("Processing video: '%s'\n", videoPath)
 
-	// Extract frames
+	// Extract video name
 	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	
+	// Initialize storage based on configuration
+	var store storage.Storage
+	
+	// Check if PostgreSQL is enabled
+	dbEnabled := os.Getenv("DB_ENABLED") == "true"
+	if dbEnabled {
+		// Get PostgreSQL configuration from environment
+		pgConfig := storage.PostgresConfig{
+			Host:     getEnvOrDefault("DB_HOST", "localhost"),
+			Port:     getEnvOrDefault("DB_PORT", "5432"),
+			User:     getEnvOrDefault("DB_USER", "postgres"),
+			Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+			DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
+		}
+		
+		// Initialize database schema if needed
+		if err := storage.InitSchema(ctx, pgConfig); err != nil {
+			return fmt.Errorf("failed to initialize database schema: %v", err)
+		}
+		
+		// Create PostgreSQL storage
+		pgStorage, err := storage.NewPostgresStorage(ctx, pgConfig, videoName)
+		if err != nil {
+			return fmt.Errorf("failed to create PostgreSQL storage: %v", err)
+		}
+		defer pgStorage.Close()
+		
+		store = pgStorage
+	} else {
+		// Use file-based storage if PostgreSQL is not enabled
+		store = storage.NewStorage(outputDir, videoName)
+	}
+
+	// Extract frames
 	frameDirPath := filepath.Join(outputDir, videoName)
 
 	err := extractor.ExtractFrames(videoPath, outputDir, 15)
@@ -169,4 +204,12 @@ func (p *Processor) analyzeImage(ctx context.Context, imagePath string) (string,
 	fmt.Printf("Raw response content: %s\n", content)
 
 	return content, nil
+}
+
+// Helper function to get environment variables with defaults
+func getEnvOrDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
 }

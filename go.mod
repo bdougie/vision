@@ -9,4 +9,7 @@ require (
 
 require github.com/agent-api/core v0.0.0-20250320002200-9e435dd4d404
 
-require github.com/go-logr/logr v1.4.2 // indirect
+require (
+	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/pgvector/pgvector-go v0.3.0 // indirect
+)
