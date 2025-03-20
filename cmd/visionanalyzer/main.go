@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -75,4 +76,43 @@ func main() {
 	}
 
 	fmt.Println("Video processing completed successfully!")
+
+	// Add these flags to your main function
+	searchQuery := flag.String("search", "", "Search for frames matching this description")
+	searchLimit := flag.Int("limit", 5, "Maximum number of search results")
+	flag.Parse()
+
+	// Add this after processing video
+	if *searchQuery != "" && dbEnabled {
+		fmt.Printf("Searching for frames matching: %s\n", *searchQuery)
+
+		// Get PostgreSQL configuration
+		pgConfig := storage.PostgresConfig{
+			Host:     getEnvOrDefault("DB_HOST", "localhost"),
+			Port:     getEnvOrDefault("DB_PORT", "5432"),
+			User:     getEnvOrDefault("DB_USER", "postgres"),
+			Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+			DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
+		}
+
+		// Create PostgreSQL storage
+		pgStorage, err := storage.NewPostgresStorage(ctx, pgConfig, videoName)
+		if err != nil {
+			log.Fatalf("Failed to create PostgreSQL storage: %v", err)
+		}
+		defer pgStorage.Close()
+
+		// Search for similar frames
+		results, err := pgStorage.SearchSimilarFrames(ctx, *searchQuery, *searchLimit)
+		if err != nil {
+			log.Fatalf("Failed to search for similar frames: %v", err)
+		}
+
+		// Display results
+		fmt.Printf("Found %d matching frames:\n", len(results))
+		for i, result := range results {
+			fmt.Printf("%d. Frame %d (%.2f%% similarity)\n", i+1, result.FrameNumber, result.Similarity*100)
+			fmt.Printf("   Description: %s\n\n", result.Description)
+		}
+	}
 }
