@@ -10,6 +10,7 @@ import (
 
 	"log/slog"
 
+	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 
 	"github.com/bdougie/vision/internal/analyzer"
@@ -20,7 +21,7 @@ func main() {
 	ctx := context.Background()
 
 	// Configure logger
-	logger := slog.New(
+	logger := logr.FromSlogHandler(
 		tint.NewHandler(os.Stderr, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: "15:04:05",
@@ -29,7 +30,7 @@ func main() {
 
 	// Parse command line arguments
 	videoPath := "path/to/your/video.mp4"
-	outputDir := "output_frames"  // default value
+	outputDir := "output_frames" // default value
 
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
@@ -59,7 +60,7 @@ func main() {
 	store := storage.NewStorage(outputDir, videoName)
 
 	// Initialize agent
-	visionAgent, err := analyzer.NewAgent(ctx, logger)
+	visionAgent, err := analyzer.NewAgent(ctx, &logger)
 	if err != nil {
 		log.Fatalf("Failed to initialize vision agent: %v", err)
 	}
