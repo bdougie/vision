@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/bdougie/vision/internal/models"
@@ -161,42 +160,31 @@ func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisR
     return nil
 }
 
-// Double-check that PostgresStorage implements the Storage interface
-func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisResult) error {
-    // existing implementation...
-}
-
-func (s *PostgresStorage) Flush() error {
-    // existing implementation...
-    return nil
-}
-
 // Flush implements the Storage interface - no-op for Postgres as we save immediately
 func (s *PostgresStorage) Flush() error {
     return nil
 }
 
 // generateEmbedding creates a vector embedding for the content
-// This is a placeholder - you'll need to implement actual embedding generation
 func (s *PostgresStorage) generateEmbedding(ctx context.Context, content string) ([]float32, error) {
-	// This is a placeholder - in a real application, you would:
-	// 1. Call an embedding API like OpenAI
-	// 2. Process the content to create embeddings
-	// For now, we'll return a simple dummy embedding
-	return []float32{0.1, 0.2, 0.3, 0.4}, nil
+    // This is a placeholder - in a real application, you would:
+    // 1. Call an embedding API like OpenAI
+    // 2. Process the content to create embeddings
+    // For now, we'll return a simple dummy embedding
+    return []float32{0.1, 0.2, 0.3, 0.4}, nil
 }
 
 // SearchSimilarFrames finds frames with similar content
 func (s *PostgresStorage) SearchSimilarFrames(ctx context.Context, query string, limit int) ([]models.FrameSearchResult, error) {
-	// Generate embedding for query
-	queryEmbedding, err := s.generateEmbedding(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
-	}
+    // Generate embedding for query
+    queryEmbedding, err := s.generateEmbedding(ctx, query)
+    if err != nil {
+        return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+    }
 
-	// Search for similar frames
-	rows, err := s.pool.Query(ctx,
-		`SELECT f.frame_number, f.frame_path, a.content, 
+    // Search for similar frames
+    rows, err := s.pool.Query(ctx,
+        `SELECT f.frame_number, f.frame_path, a.content, 
         1 - (a.embedding <=> $1) AS similarity
         FROM analyses a
         JOIN frames f ON a.frame_id = f.id
@@ -204,25 +192,25 @@ func (s *PostgresStorage) SearchSimilarFrames(ctx context.Context, query string,
         WHERE v.id = $2
         ORDER BY a.embedding <=> $1
         LIMIT $3`,
-		pgvector.NewVector(queryEmbedding), s.videoID, limit)
+        pgvector.NewVector(queryEmbedding), s.videoID, limit)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to search similar frames: %w", err)
-	}
-	defer rows.Close()
+    if err != nil {
+        return nil, fmt.Errorf("failed to search similar frames: %w", err)
+    }
+    defer rows.Close()
 
-	// Process results
-	var results []models.FrameSearchResult
-	for rows.Next() {
-		var result models.FrameSearchResult
-		if err := rows.Scan(&result.FrameNumber, &result.FramePath,
-			&result.Description, &result.Similarity); err != nil {
-			return nil, fmt.Errorf("failed to scan search results: %w", err)
-		}
-		results = append(results, result)
-	}
+    // Process results
+    var results []models.FrameSearchResult
+    for rows.Next() {
+        var result models.FrameSearchResult
+        if err := rows.Scan(&result.FrameNumber, &result.FramePath,
+            &result.Description, &result.Similarity); err != nil {
+            return nil, fmt.Errorf("failed to scan search results: %w", err)
+        }
+        results = append(results, result)
+    }
 
-	return results, rows.Err()
+    return results, rows.Err()
 }
 
 // InitSchema creates the database schema if it doesn't exist
@@ -304,58 +292,4 @@ func InitSchema(ctx context.Context, config PostgresConfig) error {
 	}
 
 	return nil
-}
-
-func main() {
-	// Example Usage (Replace with your actual configuration)
-	config := PostgresConfig{
-		Host:     "localhost",
-		Port:     "5432",
-		User:     "your_user",
-		Password: "your_password",
-		DBName:   "your_db",
-	}
-
-	ctx := context.Background()
-
-	// Initialize schema
-	err := InitSchema(ctx, config)
-	if err != nil {
-		log.Fatalf("Error initializing schema: %v", err)
-	}
-
-	// Create a new PostgresStorage instance
-	storage, err := NewPostgresStorage(ctx, config, "example_video")
-	if err != nil {
-		log.Fatalf("Error creating PostgresStorage: %v", err)
-	}
-	defer storage.Close()
-
-	// Create a sample analysis result
-	result := models.AnalysisResult{
-		Frame:   "frame_0001.jpg",
-		Content: "This is a sample content for analysis.",
-	}
-
-	// Add the analysis result
-	err = storage.AddResult(ctx, result)
-	if err != nil {
-		log.Fatalf("Error adding analysis result: %v", err)
-	}
-
-	fmt.Println("Analysis result added successfully!")
-
-	// Search for similar frames
-	query := "sample content"
-	limit := 5
-	results, err := storage.SearchSimilarFrames(ctx, query, limit)
-	if err != nil {
-		log.Fatalf("Error searching similar frames: %v", err)
-	}
-
-	fmt.Println("Search Results:")
-	for _, res := range results {
-		fmt.Printf("Frame Number: %d, Frame Path: %s, Description: %s, Similarity: %f\n",
-			res.FrameNumber, res.FramePath, res.Description, res.Similarity)
-	}
 }
