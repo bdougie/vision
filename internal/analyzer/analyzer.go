@@ -20,10 +20,10 @@ const maxWorkers = 4 // Adjust based on your CPU cores
 
 type Processor struct {
 	agent   *agent.Agent
-	storage *storage.Storage
+	storage storage.Storage
 }
 
-func NewProcessor(agent *agent.Agent, storage *storage.Storage) *Processor {
+func NewProcessor(agent *agent.Agent, storage storage.Storage) *Processor {
 	return &Processor{
 		agent:   agent,
 		storage: storage,
@@ -34,8 +34,43 @@ func NewProcessor(agent *agent.Agent, storage *storage.Storage) *Processor {
 func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir string) error {
 	fmt.Printf("Processing video: '%s'\n", videoPath)
 
-	// Extract frames
+	// Extract video name
 	videoName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	
+	// Initialize storage based on configuration
+	var store storage.Storage
+	
+	// Check if PostgreSQL is enabled
+	dbEnabled := os.Getenv("DB_ENABLED") == "true"
+	if dbEnabled {
+		// Get PostgreSQL configuration from environment
+		pgConfig := storage.PostgresConfig{
+			Host:     getEnvOrDefault("DB_HOST", "localhost"),
+			Port:     getEnvOrDefault("DB_PORT", "5432"),
+			User:     getEnvOrDefault("DB_USER", "postgres"),
+			Password: getEnvOrDefault("DB_PASSWORD", "postgres"),
+			DBName:   getEnvOrDefault("DB_NAME", "vision_analysis"),
+		}
+		
+		// Initialize database schema if needed
+		if err := storage.InitSchema(ctx, pgConfig); err != nil {
+			return fmt.Errorf("failed to initialize database schema: %v", err)
+		}
+		
+		// Create PostgreSQL storage
+		pgStorage, err := storage.NewPostgresStorage(ctx, pgConfig, videoName)
+		if err != nil {
+			return fmt.Errorf("failed to create PostgreSQL storage: %v", err)
+		}
+		defer pgStorage.Close()
+		
+		store = pgStorage
+	} else {
+		// Use file-based storage if PostgreSQL is not enabled
+		store = storage.NewFileStorage(outputDir, videoName)
+	}
+
+	// Extract frames
 	frameDirPath := filepath.Join(outputDir, videoName)
 
 	err := extractor.ExtractFrames(videoPath, outputDir, 15)
@@ -68,10 +103,10 @@ func (p *Processor) ProcessVideo(ctx context.Context, videoPath, outputDir strin
 	sort.Strings(frames)
 
 	// Process frames
-	return p.processFrames(ctx, frames, frameDirPath)
+	return p.processFrames(ctx, frames, frameDirPath, store)
 }
 
-func (p *Processor) processFrames(ctx context.Context, frames []string, frameDirPath string) error {
+func (p *Processor) processFrames(ctx context.Context, frames []string, frameDirPath string, store storage.Storage) error {
 	workChan := make(chan models.WorkItem, len(frames))
 	resultsChan := make(chan models.AnalysisResult, len(frames))
 	errorsChan := make(chan error, len(frames))
@@ -120,7 +155,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	// Collect results
 	go func() {
 		for result := range resultsChan {
-			p.storage.AddResult(result)
+			store.AddResult(ctx, result)
 		}
 	}()
 
@@ -130,7 +165,7 @@ func (p *Processor) processFrames(ctx context.Context, frames []string, frameDir
 	close(errorsChan)
 
 	// Flush any remaining results
-	if err := p.storage.Flush(); err != nil {
+	if err := store.Flush(); err != nil {
 		return fmt.Errorf("failed to flush final results: %v", err)
 	}
 
@@ -169,4 +204,12 @@ func (p *Processor) analyzeImage(ctx context.Context, imagePath string) (string,
 	fmt.Printf("Raw response content: %s\n", content)
 
 	return content, nil
+}
+
+// Helper function to get environment variables with defaults
+func getEnvOrDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
 }

@@ -95,7 +95,23 @@ go run ./cmd/visionanalyzer --video path/to/video.mp4
 ```
 
 # Show help
-go run main.go --help
+./visionanalyzer --help
+
+## 🚀 Quick Start
+
+```bash
+# Process a video
+./visionanalyzer --video path/to/video.mp4
+
+# Specify custom output directory
+./visionanalyzer --video path/to/video.mp4 --output custom_output
+
+# Search for frames containing specific content (requires PostgreSQL)
+export DB_ENABLED=true
+./visionanalyzer --search "person cooking" --limit 10 --video path/to/video.mp4
+
+# Show help
+./visionanalyzer --help
 ```
 
 ## 📂 Output Structure
@@ -117,6 +133,95 @@ The `analysis_results.json` file contains frame-by-frame analysis:
     "content": "Detailed analysis of frame contents..."
   }
 ]
+```
+
+## 🛢️ PostgreSQL with pgvector Setup
+
+VisionFrameAnalyzer can store analysis results in PostgreSQL with pgvector for vector similarity search.
+
+### Prerequisites
+
+1. Install PostgreSQL (14+ recommended)
+
+```bash
+# macOS with Homebrew
+brew install postgresql@14
+brew services start postgresql@14
+
+# Verify installation
+psql --version
+```
+
+### Docker Compose Setup
+
+For easy development, you can use Docker Compose to set up PostgreSQL with pgvector:
+
+```yaml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: visiondb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+### PostgreSQL Schema
+
+Create the necessary tables and enable pgvector extension:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE videos (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE frames (
+    id SERIAL PRIMARY KEY,
+    video_id INTEGER REFERENCES videos(id),
+    frame_number INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE analyses (
+    id SERIAL PRIMARY KEY,
+    frame_id INTEGER REFERENCES frames(id),
+    content JSONB,
+    vector VECTOR(768), -- Adjust dimension based on your model
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Vector Similarity Search
+
+The pgvector implementation allows you to search for frames with similar content using vector similarity, which is much more powerful than basic text search.
+
+### Searching Frames
+
+VisionFrameAnalyzer offers two ways to search for frames:
+
+1. **Vector Similarity Search** - Find frames that are semantically similar to your query:
+
+```bash
+# Search for frames showing a person cooking (top 5 results)
+export DB_ENABLED=true
+./visionanalyzer --search "person cooking" --video path/to/video.mp4
+
+# Increase the number of results
+./visionanalyzer --search "person cooking" --limit 10 --video path/to/video.mp4
 ```
 
 ## 📁 Project Structure
