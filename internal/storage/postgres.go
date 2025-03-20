@@ -126,17 +126,41 @@ func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisR
     // Calculate timestamp from frame number (15 seconds per frame)
     timestamp := frameNum * 15
     
-    // First, store the frame information
+    // Check if this frame already exists with embeddings
     var frameID int
-    err := s.pool.QueryRow(ctx,
-        `INSERT INTO frames 
-        (video_id, frame_number, frame_path, timestamp, created_at) 
-        VALUES ($1, $2, $3, $4, $5) 
-        RETURNING id`,
-        s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
+    var hasEmbedding bool
+    err := s.pool.QueryRow(ctx, `
+        SELECT f.id, 
+        EXISTS(SELECT 1 FROM analyses a WHERE a.frame_id = f.id AND a.embedding IS NOT NULL) as has_embedding
+        FROM frames f
+        WHERE f.video_id = $1 AND f.frame_number = $2
+    `, s.videoID, frameNum).Scan(&frameID, &hasEmbedding)
     
-    if err != nil {
-        return fmt.Errorf("failed to store frame information: %w", err)
+    if err == nil {
+        // Frame exists, check if it has embeddings
+        if (hasEmbedding) {
+            // Frame already has embeddings, skip processing
+            fmt.Printf("Frame %d already has embeddings, skipping\n", frameNum)
+            return nil
+        }
+        
+        // Frame exists but doesn't have embeddings, we'll add them
+        fmt.Printf("Frame %d exists but has no embeddings, adding them\n", frameNum)
+    } else if err != pgx.ErrNoRows {
+        // Unexpected error
+        return fmt.Errorf("error checking for existing frame: %w", err)
+    } else {
+        // Frame doesn't exist, insert it
+        err = s.pool.QueryRow(ctx,
+            `INSERT INTO frames 
+            (video_id, frame_number, frame_path, timestamp, created_at) 
+            VALUES ($1, $2, $3, $4, $5) 
+            RETURNING id`,
+            s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
+        
+        if err != nil {
+            return fmt.Errorf("failed to store frame information: %w", err)
+        }
     }
     
     // Generate embedding for content
@@ -150,7 +174,9 @@ func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisR
     _, err = s.pool.Exec(ctx,
         `INSERT INTO analyses 
         (frame_id, content, embedding, created_at) 
-        VALUES ($1, $2, $3, $4)`,
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (frame_id) DO UPDATE
+        SET content = $2, embedding = $3, created_at = $4`,
         frameID, result.Content, pgvector.NewVector(embedding), time.Now())
     
     if err != nil {
@@ -211,6 +237,63 @@ func (s *PostgresStorage) SearchSimilarFrames(ctx context.Context, query string,
     }
 
     return results, rows.Err()
+}
+
+// TextSearchFrames finds frames containing specific text without using embeddings
+func (s *PostgresStorage) TextSearchFrames(ctx context.Context, query string, limit int) ([]models.FrameSearchResult, error) {
+    // Check if the video exists in the database
+    var count int
+    err := s.pool.QueryRow(ctx, 
+        "SELECT COUNT(*) FROM frames WHERE video_id = $1", 
+        s.videoID).Scan(&count)
+    
+    if err != nil {
+        return nil, fmt.Errorf("failed to check for video frames: %w", err)
+    }
+    
+    if count == 0 {
+        return nil, fmt.Errorf("no frames found for video '%s'. Run:\n\nexport DB_ENABLED=true\n./visionanalyzer --video %s\n\nto process and embed this video first", 
+            s.videoName, s.videoName)
+    }
+    
+    // Simple text search using ILIKE
+    rows, err := s.pool.Query(ctx,
+        `SELECT f.frame_number, f.frame_path, a.content, 
+        0.5 AS similarity
+        FROM analyses a
+        JOIN frames f ON a.frame_id = f.id
+        JOIN videos v ON f.video_id = v.id
+        WHERE v.id = $1 AND a.content ILIKE $2
+        ORDER BY f.frame_number
+        LIMIT $3`,
+        s.videoID, "%"+query+"%", limit)
+    
+    if err != nil {
+        return nil, fmt.Errorf("failed to search frames: %w", err)
+    }
+    defer rows.Close()
+    
+    // Process results
+    var results []models.FrameSearchResult
+    for rows.Next() {
+        var result models.FrameSearchResult
+        if err := rows.Scan(&result.FrameNumber, &result.FramePath,
+            &result.Description, &result.Similarity); err != nil {
+            return nil, fmt.Errorf("failed to scan search results: %w", err)
+        }
+        results = append(results, result)
+    }
+    
+    if err = rows.Err(); err != nil {
+        return nil, fmt.Errorf("error reading search results: %w", err)
+    }
+    
+    if len(results) == 0 {
+        // If no results found with ILIKE, inform the user
+        return nil, fmt.Errorf("no frames found containing '%s' for video '%s'", query, s.videoName)
+    }
+    
+    return results, nil
 }
 
 // InitSchema creates the database schema if it doesn't exist
@@ -291,5 +374,59 @@ func InitSchema(ctx context.Context, config PostgresConfig) error {
 		return fmt.Errorf("failed to create database indexes: %w", err)
 	}
 
+	// Add unique constraint for analyses.frame_id
+	if err := UpdateSchema(ctx, config); err != nil {
+		return fmt.Errorf("failed to update schema: %w", err)
+	}
+
 	return nil
+}
+
+// UpdateSchema adds UNIQUE constraint on frame_id if needed
+func UpdateSchema(ctx context.Context, config PostgresConfig) error {
+    // Build connection string
+    connString := fmt.Sprintf(
+        "postgres://%s:%s@%s:%s/%s",
+        config.User,
+        config.Password,
+        config.Host,
+        config.Port,
+        config.DBName,
+    )
+
+    // Connect to PostgreSQL
+    conn, err := pgx.Connect(ctx, connString)
+    if err != nil {
+        return fmt.Errorf("failed to connect to database: %w", err)
+    }
+    defer conn.Close(ctx)
+    
+    // Check if unique constraint exists
+    var constraintExists bool
+    err = conn.QueryRow(ctx, `
+        SELECT EXISTS (
+            SELECT 1 
+            FROM pg_constraint 
+            WHERE conname = 'analyses_frame_id_key'
+        )
+    `).Scan(&constraintExists)
+    
+    if err != nil {
+        return fmt.Errorf("failed to check constraint existence: %w", err)
+    }
+    
+    // Add unique constraint if it doesn't exist
+    if !constraintExists {
+        _, err = conn.Exec(ctx, `
+            ALTER TABLE analyses 
+            ADD CONSTRAINT analyses_frame_id_key 
+            UNIQUE (frame_id)
+        `)
+        
+        if err != nil {
+            return fmt.Errorf("failed to add unique constraint: %w", err)
+        }
+    }
+    
+    return nil
 }

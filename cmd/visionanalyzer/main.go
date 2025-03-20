@@ -15,12 +15,14 @@ import (
 	"github.com/lmittmann/tint"
 
 	"github.com/bdougie/vision/internal/analyzer"
+	"github.com/bdougie/vision/internal/models"
 	"github.com/bdougie/vision/internal/storage"
 )
 
 func main() {
     // Initialize flag package before using it
-    searchQuery := flag.String("search", "", "Search for frames matching this description")
+    searchQuery := flag.String("search", "", "Search for frames matching this description (uses vector similarity)")
+    textSearch := flag.String("text-search", "", "Search for frames containing this text (exact match)")
     searchLimit := flag.Int("limit", 5, "Maximum number of search results")
     videoPathFlag := flag.String("video", "", "Path to the video file")
     outputDirFlag := flag.String("output", "output_frames", "Output directory for frames")
@@ -117,9 +119,7 @@ func main() {
     fmt.Println("Video processing completed successfully!")
 
     // Handle search query if provided and DB is enabled
-    if *searchQuery != "" && dbEnabled {
-        fmt.Printf("Searching for frames matching: %s\n", *searchQuery)
-
+    if (*searchQuery != "" || *textSearch != "") && dbEnabled {
         // Get PostgreSQL configuration
         pgConfig := storage.PostgresConfig{
             Host:     getEnvOrDefault("DB_HOST", "localhost"),
@@ -142,16 +142,37 @@ func main() {
             defer pgStorage.Close()
         }
 
-        // Search for similar frames
-        results, err := pgStorage.SearchSimilarFrames(ctx, *searchQuery, *searchLimit)
+        var results []models.FrameSearchResult
+        var err error
+        
+        if *searchQuery != "" {
+            // Vector similarity search
+            fmt.Printf("Searching for frames matching: %s\n", *searchQuery)
+            results, err = pgStorage.SearchSimilarFrames(ctx, *searchQuery, *searchLimit)
+        } else {
+            // Text search
+            fmt.Printf("Searching for frames containing text: %s\n", *textSearch)
+            results, err = pgStorage.TextSearchFrames(ctx, *textSearch, *searchLimit)
+        }
+        
         if err != nil {
-            log.Fatalf("Failed to search for similar frames: %v", err)
+            log.Printf("Search error: %v", err)
+            os.Exit(1)
         }
 
         // Display results
         fmt.Printf("Found %d matching frames:\n", len(results))
         for i, result := range results {
-            fmt.Printf("%d. Frame %d (%.2f%% similarity)\n", i+1, result.FrameNumber, result.Similarity*100)
+            similarity := result.Similarity * 100
+            var similarityText string
+            
+            if *textSearch != "" {
+                similarityText = "(text match)"
+            } else {
+                similarityText = fmt.Sprintf("(%.2f%% similarity)", similarity)
+            }
+            
+            fmt.Printf("%d. Frame %d %s\n", i+1, result.FrameNumber, similarityText)
             fmt.Printf("   Description: %s\n\n", result.Description)
         }
     }

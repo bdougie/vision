@@ -209,6 +209,21 @@ CREATE TABLE analyses (
 
 The pgvector implementation allows you to search for frames with similar content using vector similarity, which is much more powerful than basic text search.
 
+### Searching Frames
+
+VisionFrameAnalyzer offers two ways to search for frames:
+
+1. **Vector Similarity Search** - Find frames that are semantically similar to your query:
+
+```bash
+# Search for frames showing a person cooking (top 5 results)
+export DB_ENABLED=true
+./visionanalyzer --search "person cooking" --video path/to/video.mp4
+
+# Increase the number of results
+./visionanalyzer --search "person cooking" --limit 10 --video path/to/video.mp4
+```
+
 ## 📁 Project Structure
 ```
 vision/
