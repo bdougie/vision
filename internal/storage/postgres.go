@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/bdougie/vision/internal/models"
@@ -33,11 +34,28 @@ type Vector struct {
 	Data []float64
 }
 
+// EmbeddingResult represents the result of embedding generation
+type EmbeddingResult struct {
+	Content   string
+	Embedding []float32
+	Error     error
+}
+
+// EmbeddingWork represents a unit of embedding work
+type EmbeddingWork struct {
+	Content string
+	Result  chan<- EmbeddingResult
+}
+
 // PostgresStorage manages interaction with PostgreSQL
 type PostgresStorage struct {
-	pool      *pgxpool.Pool
-	videoID   int
-	videoName string
+	pool            *pgxpool.Pool
+	videoID         int
+	videoName       string
+	embeddingWorkers int
+	embeddingQueue   chan EmbeddingWork
+	embeddingCache   sync.Map // Thread-safe map for caching embeddings
+	wg               sync.WaitGroup
 }
 
 // NewPostgresStorage creates a new PostgreSQL storage connection
@@ -63,10 +81,15 @@ func NewPostgresStorage(ctx context.Context, config PostgresConfig, videoName st
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Create storage instance
+	// Create storage instance with embedding workers
+	embeddingWorkers := 4 // Number of concurrent embedding generators
+	embeddingQueue := make(chan EmbeddingWork, 100) // Buffer size for embedding requests
+	
 	storage := &PostgresStorage{
-		pool:      pool,
-		videoName: videoName,
+		pool:            pool,
+		videoName:       videoName,
+		embeddingWorkers: embeddingWorkers,
+		embeddingQueue:   embeddingQueue,
 	}
 
 	// Get or create video ID
@@ -76,13 +99,57 @@ func NewPostgresStorage(ctx context.Context, config PostgresConfig, videoName st
 	}
 	storage.videoID = videoID
 
+	// Start embedding workers
+	storage.startEmbeddingWorkers(ctx)
+
 	return storage, nil
 }
 
-// Close closes the database connection
+// Close closes the database connection and worker goroutines
 func (s *PostgresStorage) Close() {
+	if s.embeddingQueue != nil {
+		close(s.embeddingQueue)
+	}
+	s.wg.Wait() // Wait for all workers to finish
+	
 	if s.pool != nil {
 		s.pool.Close()
+	}
+}
+
+// startEmbeddingWorkers starts a pool of goroutines for generating embeddings
+func (s *PostgresStorage) startEmbeddingWorkers(ctx context.Context) {
+	for i := 0; i < s.embeddingWorkers; i++ {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for work := range s.embeddingQueue {
+				// Check cache first
+				if cachedEmb, ok := s.embeddingCache.Load(work.Content); ok {
+					if embedding, validCache := cachedEmb.([]float32); validCache {
+						work.Result <- EmbeddingResult{
+							Content:   work.Content,
+							Embedding: embedding,
+						}
+						continue
+					}
+				}
+
+				// Generate embedding
+				embedding, err := s.generateEmbedding(ctx, work.Content)
+				if err == nil {
+					// Cache the successful result
+					s.embeddingCache.Store(work.Content, embedding)
+				}
+				
+				// Send result back
+				work.Result <- EmbeddingResult{
+					Content:   work.Content,
+					Embedding: embedding,
+					Error:     err,
+				}
+			}
+		}()
 	}
 }
 
@@ -114,186 +181,263 @@ func (s *PostgresStorage) getOrCreateVideo(ctx context.Context, videoName string
 	return id, nil
 }
 
+// getEmbeddingAsync requests an embedding generation asynchronously
+func (s *PostgresStorage) getEmbeddingAsync(content string) <-chan EmbeddingResult {
+	resultChan := make(chan EmbeddingResult, 1)
+	
+	// Check if we're already at capacity
+	select {
+	case s.embeddingQueue <- EmbeddingWork{
+		Content: content,
+		Result:  resultChan,
+	}:
+		// Work queued successfully
+	default:
+		// Queue is full, return an error immediately
+		resultChan <- EmbeddingResult{
+			Content: content,
+			Error:   fmt.Errorf("embedding queue is full, try again later"),
+		}
+		close(resultChan)
+	}
+	
+	return resultChan
+}
+
 // AddResult adds a frame analysis result to the database
 func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisResult) error {
-    // Extract frame number from filename
-    frameName := result.Frame
-    frameNum := 0
-    if _, err := fmt.Sscanf(frameName, "frame_%04d.jpg", &frameNum); err != nil {
-        return fmt.Errorf("invalid frame filename format: %s", frameName)
-    }
-    
-    // Calculate timestamp from frame number (15 seconds per frame)
-    timestamp := frameNum * 15
-    
-    // Check if this frame already exists with embeddings
-    var frameID int
-    var hasEmbedding bool
-    err := s.pool.QueryRow(ctx, `
-        SELECT f.id, 
-        EXISTS(SELECT 1 FROM analyses a WHERE a.frame_id = f.id AND a.embedding IS NOT NULL) as has_embedding
-        FROM frames f
-        WHERE f.video_id = $1 AND f.frame_number = $2
-    `, s.videoID, frameNum).Scan(&frameID, &hasEmbedding)
-    
-    if err == nil {
-        // Frame exists, check if it has embeddings
-        if (hasEmbedding) {
-            // Frame already has embeddings, skip processing
-            fmt.Printf("Frame %d already has embeddings, skipping\n", frameNum)
-            return nil
-        }
-        
-        // Frame exists but doesn't have embeddings, we'll add them
-        fmt.Printf("Frame %d exists but has no embeddings, adding them\n", frameNum)
-    } else if err != pgx.ErrNoRows {
-        // Unexpected error
-        return fmt.Errorf("error checking for existing frame: %w", err)
-    } else {
-        // Frame doesn't exist, insert it
-        err = s.pool.QueryRow(ctx,
-            `INSERT INTO frames 
-            (video_id, frame_number, frame_path, timestamp, created_at) 
-            VALUES ($1, $2, $3, $4, $5) 
-            RETURNING id`,
-            s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
-        
-        if err != nil {
-            return fmt.Errorf("failed to store frame information: %w", err)
-        }
-    }
-    
-    // Generate embedding for content
-    embedding, err := s.generateEmbedding(ctx, result.Content)
-    if err != nil {
-        // Log error but continue without embedding
-        fmt.Printf("Warning: Failed to generate embedding: %v\n", err)
-    }
-    
-    // Store the analysis result with embedding
-    _, err = s.pool.Exec(ctx,
-        `INSERT INTO analyses 
-        (frame_id, content, embedding, created_at) 
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (frame_id) DO UPDATE
-        SET content = $2, embedding = $3, created_at = $4`,
-        frameID, result.Content, pgvector.NewVector(embedding), time.Now())
-    
-    if err != nil {
-        return fmt.Errorf("failed to store analysis: %w", err)
-    }
-    
-    return nil
+	// Extract frame number from filename
+	frameName := result.Frame
+	frameNum := 0
+	if _, err := fmt.Sscanf(frameName, "frame_%04d.jpg", &frameNum); err != nil {
+		return fmt.Errorf("invalid frame filename format: %s", frameName)
+	}
+	
+	// Calculate timestamp from frame number (15 seconds per frame)
+	timestamp := frameNum * 15
+	
+	// Check if this frame already exists with embeddings
+	var frameID int
+	var hasEmbedding bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT f.id, 
+		EXISTS(SELECT 1 FROM analyses a WHERE a.frame_id = f.id AND a.embedding IS NOT NULL) as has_embedding
+		FROM frames f
+		WHERE f.video_id = $1 AND f.frame_number = $2
+	`, s.videoID, frameNum).Scan(&frameID, &hasEmbedding)
+	
+	if err == nil {
+		// Frame exists, check if it has embeddings
+		if hasEmbedding {
+			// Frame already has embeddings, skip processing
+			fmt.Printf("Frame %d already has embeddings, skipping\n", frameNum)
+			return nil
+		}
+		
+		// Frame exists but doesn't have embeddings, we'll add them
+		fmt.Printf("Frame %d exists but has no embeddings, adding them\n", frameNum)
+	} else if err != pgx.ErrNoRows {
+		// Unexpected error
+		return fmt.Errorf("error checking for existing frame: %w", err)
+	} else {
+		// Frame doesn't exist, insert it
+		err = s.pool.QueryRow(ctx,
+			`INSERT INTO frames 
+			(video_id, frame_number, frame_path, timestamp, created_at) 
+			VALUES ($1, $2, $3, $4, $5) 
+			RETURNING id`,
+			s.videoID, frameNum, frameName, timestamp, time.Now()).Scan(&frameID)
+		
+		if err != nil {
+			return fmt.Errorf("failed to store frame information: %w", err)
+		}
+	}
+	
+	// Request embedding generation asynchronously
+	embeddingResultChan := s.getEmbeddingAsync(result.Content)
+	embeddingResult := <-embeddingResultChan
+	
+	var embedding []float32
+	if embeddingResult.Error != nil {
+		// Log error but continue without embedding
+		fmt.Printf("Warning: Failed to generate embedding: %v\n", embeddingResult.Error)
+		embedding = []float32{0.1, 0.2, 0.3, 0.4} // Default fallback
+	} else {
+		embedding = embeddingResult.Embedding
+	}
+	
+	// Store the analysis result with embedding
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO analyses 
+		(frame_id, content, embedding, created_at) 
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (frame_id) DO UPDATE
+		SET content = $2, embedding = $3, created_at = $4`,
+		frameID, result.Content, pgvector.NewVector(embedding), time.Now())
+	
+	if err != nil {
+		return fmt.Errorf("failed to store analysis: %w", err)
+	}
+	
+	return nil
+}
+
+// BatchAddResults adds multiple analysis results in parallel
+func (s *PostgresStorage) BatchAddResults(ctx context.Context, results []models.AnalysisResult) error {
+	// Create channels for parallel processing
+	errChan := make(chan error, len(results))
+	semaphore := make(chan struct{}, 8) // Limit concurrent DB operations
+	var wg sync.WaitGroup
+	
+	// Process each result concurrently
+	for _, result := range results {
+		wg.Add(1)
+		go func(r models.AnalysisResult) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			
+			if err := s.AddResult(ctx, r); err != nil {
+				errChan <- fmt.Errorf("failed to add result for frame %s: %w", r.Frame, err)
+			}
+		}(result)
+	}
+	
+	// Wait for all operations to complete
+	wg.Wait()
+	close(errChan)
+	
+	// Collect errors
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("encountered %d errors during batch processing", len(errs))
+	}
+	
+	return nil
 }
 
 // Flush implements the Storage interface - no-op for Postgres as we save immediately
 func (s *PostgresStorage) Flush() error {
-    return nil
+	return nil
 }
 
 // generateEmbedding creates a vector embedding for the content
 func (s *PostgresStorage) generateEmbedding(ctx context.Context, content string) ([]float32, error) {
-    // This is a placeholder - in a real application, you would:
-    // 1. Call an embedding API like OpenAI
-    // 2. Process the content to create embeddings
-    // For now, we'll return a simple dummy embedding
-    return []float32{0.1, 0.2, 0.3, 0.4}, nil
+	// This is a placeholder - in a real application, you would:
+	// 1. Call an embedding API like OpenAI
+	// 2. Process the content to create embeddings
+	
+	// Simulate a computation-heavy task
+	time.Sleep(50 * time.Millisecond)
+	
+	// For now, we'll return a simple dummy embedding
+	return []float32{0.1, 0.2, 0.3, 0.4}, nil
 }
 
 // SearchSimilarFrames finds frames with similar content
 func (s *PostgresStorage) SearchSimilarFrames(ctx context.Context, query string, limit int) ([]models.FrameSearchResult, error) {
-    // Generate embedding for query
-    queryEmbedding, err := s.generateEmbedding(ctx, query)
-    if err != nil {
-        return nil, fmt.Errorf("failed to generate query embedding: %w", err)
-    }
+	// Generate embedding for query (using the worker pool)
+	embeddingResultChan := s.getEmbeddingAsync(query)
+	embeddingResult := <-embeddingResultChan
+	
+	if embeddingResult.Error != nil {
+		return nil, fmt.Errorf("failed to generate query embedding: %w", embeddingResult.Error)
+	}
+	
+	queryEmbedding := embeddingResult.Embedding
 
-    // Search for similar frames
-    rows, err := s.pool.Query(ctx,
-        `SELECT f.frame_number, f.frame_path, a.content, 
-        1 - (a.embedding <=> $1) AS similarity
-        FROM analyses a
-        JOIN frames f ON a.frame_id = f.id
-        JOIN videos v ON f.video_id = v.id
-        WHERE v.id = $2
-        ORDER BY a.embedding <=> $1
-        LIMIT $3`,
-        pgvector.NewVector(queryEmbedding), s.videoID, limit)
+	// Search for similar frames
+	rows, err := s.pool.Query(ctx,
+		`SELECT f.frame_number, f.frame_path, a.content, 
+		1 - (a.embedding <=> $1) AS similarity
+		FROM analyses a
+		JOIN frames f ON a.frame_id = f.id
+		JOIN videos v ON f.video_id = v.id
+		WHERE v.id = $2
+		ORDER BY a.embedding <=> $1
+		LIMIT $3`,
+		pgvector.NewVector(queryEmbedding), s.videoID, limit)
 
-    if err != nil {
-        return nil, fmt.Errorf("failed to search similar frames: %w", err)
-    }
-    defer rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to search similar frames: %w", err)
+	}
+	defer rows.Close()
 
-    // Process results
-    var results []models.FrameSearchResult
-    for rows.Next() {
-        var result models.FrameSearchResult
-        if err := rows.Scan(&result.FrameNumber, &result.FramePath,
-            &result.Description, &result.Similarity); err != nil {
-            return nil, fmt.Errorf("failed to scan search results: %w", err)
-        }
-        results = append(results, result)
-    }
+	// Process results
+	var results []models.FrameSearchResult
+	for rows.Next() {
+		var result models.FrameSearchResult
+		if err := rows.Scan(&result.FrameNumber, &result.FramePath,
+			&result.Description, &result.Similarity); err != nil {
+			return nil, fmt.Errorf("failed to scan search results: %w", err)
+		}
+		results = append(results, result)
+	}
 
-    return results, rows.Err()
+	return results, rows.Err()
 }
 
 // TextSearchFrames finds frames containing specific text without using embeddings
 func (s *PostgresStorage) TextSearchFrames(ctx context.Context, query string, limit int) ([]models.FrameSearchResult, error) {
-    // Check if the video exists in the database
-    var count int
-    err := s.pool.QueryRow(ctx, 
-        "SELECT COUNT(*) FROM frames WHERE video_id = $1", 
-        s.videoID).Scan(&count)
-    
-    if err != nil {
-        return nil, fmt.Errorf("failed to check for video frames: %w", err)
-    }
-    
-    if count == 0 {
-        return nil, fmt.Errorf("no frames found for video '%s'. Run:\n\nexport DB_ENABLED=true\n./visionanalyzer --video %s\n\nto process and embed this video first", 
-            s.videoName, s.videoName)
-    }
-    
-    // Simple text search using ILIKE
-    rows, err := s.pool.Query(ctx,
-        `SELECT f.frame_number, f.frame_path, a.content, 
-        0.5 AS similarity
-        FROM analyses a
-        JOIN frames f ON a.frame_id = f.id
-        JOIN videos v ON f.video_id = v.id
-        WHERE v.id = $1 AND a.content ILIKE $2
-        ORDER BY f.frame_number
-        LIMIT $3`,
-        s.videoID, "%"+query+"%", limit)
-    
-    if err != nil {
-        return nil, fmt.Errorf("failed to search frames: %w", err)
-    }
-    defer rows.Close()
-    
-    // Process results
-    var results []models.FrameSearchResult
-    for rows.Next() {
-        var result models.FrameSearchResult
-        if err := rows.Scan(&result.FrameNumber, &result.FramePath,
-            &result.Description, &result.Similarity); err != nil {
-            return nil, fmt.Errorf("failed to scan search results: %w", err)
-        }
-        results = append(results, result)
-    }
-    
-    if err = rows.Err(); err != nil {
-        return nil, fmt.Errorf("error reading search results: %w", err)
-    }
-    
-    if len(results) == 0 {
-        // If no results found with ILIKE, inform the user
-        return nil, fmt.Errorf("no frames found containing '%s' for video '%s'", query, s.videoName)
-    }
-    
-    return results, nil
+	// Check if the video exists in the database
+	var count int
+	err := s.pool.QueryRow(ctx, 
+		"SELECT COUNT(*) FROM frames WHERE video_id = $1", 
+		s.videoID).Scan(&count)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for video frames: %w", err)
+	}
+	
+	if count == 0 {
+		return nil, fmt.Errorf("no frames found for video '%s'. Run:\n\nexport DB_ENABLED=true\n./visionanalyzer --video %s\n\nto process and embed this video first", 
+			s.videoName, s.videoName)
+	}
+	
+	// Simple text search using ILIKE
+	rows, err := s.pool.Query(ctx,
+		`SELECT f.frame_number, f.frame_path, a.content, 
+		0.5 AS similarity
+		FROM analyses a
+		JOIN frames f ON a.frame_id = f.id
+		JOIN videos v ON f.video_id = v.id
+		WHERE v.id = $1 AND a.content ILIKE $2
+		ORDER BY f.frame_number
+		LIMIT $3`,
+		s.videoID, "%"+query+"%", limit)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to search frames: %w", err)
+	}
+	defer rows.Close()
+	
+	// Process results
+	var results []models.FrameSearchResult
+	for rows.Next() {
+		var result models.FrameSearchResult
+		if err := rows.Scan(&result.FrameNumber, &result.FramePath,
+			&result.Description, &result.Similarity); err != nil {
+			return nil, fmt.Errorf("failed to scan search results: %w", err)
+		}
+		results = append(results, result)
+	}
+	
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading search results: %w", err)
+	}
+	
+	if len(results) == 0 {
+		// If no results found with ILIKE, inform the user
+		return nil, fmt.Errorf("no frames found containing '%s' for video '%s'", query, s.videoName)
+	}
+	
+	return results, nil
 }
 
 // InitSchema creates the database schema if it doesn't exist
