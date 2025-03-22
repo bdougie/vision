@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bdougie/vision/internal/embeddings"
 	"github.com/bdougie/vision/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool" // Import the PostgreSQL driver
@@ -25,7 +26,7 @@ type PostgresConfig struct {
 type AnalyzeResult struct {
 	ID       int
 	Text     string
-	Vectors  []Vector
+	Vectors  []embeddings.Vector
 	// Add other relevant fields here
 }
 
@@ -52,9 +53,7 @@ type PostgresStorage struct {
 	pool            *pgxpool.Pool
 	videoID         int
 	videoName       string
-	embeddingWorkers int
-	embeddingQueue   chan EmbeddingWork
-	embeddingCache   sync.Map // Thread-safe map for caching embeddings
+	embeddingService *embeddings.Service
 	wg               sync.WaitGroup
 }
 
@@ -81,15 +80,14 @@ func NewPostgresStorage(ctx context.Context, config PostgresConfig, videoName st
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Create storage instance with embedding workers
+	// Create embedding service with workers
 	embeddingWorkers := 4 // Number of concurrent embedding generators
-	embeddingQueue := make(chan EmbeddingWork, 100) // Buffer size for embedding requests
+	embeddingService := embeddings.NewService(embeddingWorkers)
 	
 	storage := &PostgresStorage{
 		pool:            pool,
 		videoName:       videoName,
-		embeddingWorkers: embeddingWorkers,
-		embeddingQueue:   embeddingQueue,
+		embeddingService: embeddingService,
 	}
 
 	// Get or create video ID
@@ -99,57 +97,21 @@ func NewPostgresStorage(ctx context.Context, config PostgresConfig, videoName st
 	}
 	storage.videoID = videoID
 
-	// Start embedding workers
-	storage.startEmbeddingWorkers(ctx)
-
 	return storage, nil
 }
 
 // Close closes the database connection and worker goroutines
 func (s *PostgresStorage) Close() {
-	if s.embeddingQueue != nil {
-		close(s.embeddingQueue)
+	// Close embedding service
+	if s.embeddingService != nil {
+		s.embeddingService.Close()
 	}
-	s.wg.Wait() // Wait for all workers to finish
+	
+	// Wait for all remaining operations to finish
+	s.wg.Wait()
 	
 	if s.pool != nil {
 		s.pool.Close()
-	}
-}
-
-// startEmbeddingWorkers starts a pool of goroutines for generating embeddings
-func (s *PostgresStorage) startEmbeddingWorkers(ctx context.Context) {
-	for i := 0; i < s.embeddingWorkers; i++ {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			for work := range s.embeddingQueue {
-				// Check cache first
-				if cachedEmb, ok := s.embeddingCache.Load(work.Content); ok {
-					if embedding, validCache := cachedEmb.([]float32); validCache {
-						work.Result <- EmbeddingResult{
-							Content:   work.Content,
-							Embedding: embedding,
-						}
-						continue
-					}
-				}
-
-				// Generate embedding
-				embedding, err := s.generateEmbedding(ctx, work.Content)
-				if err == nil {
-					// Cache the successful result
-					s.embeddingCache.Store(work.Content, embedding)
-				}
-				
-				// Send result back
-				work.Result <- EmbeddingResult{
-					Content:   work.Content,
-					Embedding: embedding,
-					Error:     err,
-				}
-			}
-		}()
 	}
 }
 
@@ -179,29 +141,6 @@ func (s *PostgresStorage) getOrCreateVideo(ctx context.Context, videoName string
 	}
 
 	return id, nil
-}
-
-// getEmbeddingAsync requests an embedding generation asynchronously
-func (s *PostgresStorage) getEmbeddingAsync(content string) <-chan EmbeddingResult {
-	resultChan := make(chan EmbeddingResult, 1)
-	
-	// Check if we're already at capacity
-	select {
-	case s.embeddingQueue <- EmbeddingWork{
-		Content: content,
-		Result:  resultChan,
-	}:
-		// Work queued successfully
-	default:
-		// Queue is full, return an error immediately
-		resultChan <- EmbeddingResult{
-			Content: content,
-			Error:   fmt.Errorf("embedding queue is full, try again later"),
-		}
-		close(resultChan)
-	}
-	
-	return resultChan
 }
 
 // AddResult adds a frame analysis result to the database
@@ -253,8 +192,8 @@ func (s *PostgresStorage) AddResult(ctx context.Context, result models.AnalysisR
 		}
 	}
 	
-	// Request embedding generation asynchronously
-	embeddingResultChan := s.getEmbeddingAsync(result.Content)
+	// Request embedding generation asynchronously using the embedding service
+	embeddingResultChan := s.embeddingService.GetEmbedding(result.Content)
 	embeddingResult := <-embeddingResultChan
 	
 	var embedding []float32
@@ -342,8 +281,8 @@ func (s *PostgresStorage) generateEmbedding(ctx context.Context, content string)
 
 // SearchSimilarFrames finds frames with similar content
 func (s *PostgresStorage) SearchSimilarFrames(ctx context.Context, query string, limit int) ([]models.FrameSearchResult, error) {
-	// Generate embedding for query (using the worker pool)
-	embeddingResultChan := s.getEmbeddingAsync(query)
+	// Generate embedding for query using the embedding service
+	embeddingResultChan := s.embeddingService.GetEmbedding(query)
 	embeddingResult := <-embeddingResultChan
 	
 	if embeddingResult.Error != nil {
